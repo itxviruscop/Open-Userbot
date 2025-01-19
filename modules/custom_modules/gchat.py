@@ -76,7 +76,7 @@ async def gchat(client: Client, message: Message):
         db.set(collection, f"chat_history.{user_id}", chat_history)
 
         # Add random delay before simulating typing
-        delay = random.choice([5, 10, 12])
+        delay = random.choice([4, 8, 10])
         await asyncio.sleep(delay)
 
         # Simulate typing
@@ -122,7 +122,7 @@ async def gchat(client: Client, message: Message):
                 # Check if the error is due to rate limits
                 if "429" in str(e):
                     retries -= 1
-                    backoff = random.uniform(5, 10)
+                    backoff = random.uniform(5, 8)
                     await asyncio.sleep(backoff)
                     continue
                 # If it's not a 429 error, raise the exception
