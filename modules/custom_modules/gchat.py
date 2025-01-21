@@ -34,7 +34,7 @@ default_bot_role = (
     "Write short, casual messages like a real human; your response should be a maximum of one line. "
     "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
     "You can send voice messages too (just type .el before a message, and it will be auto-converted into voice). "
-    "Rarely send voice messages, rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. "
+    "Rarely send voice messages, rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. (you are currently talking them on telegram.)"
     "Your messages will always contain the history of our chat, where the user's name is labeled. "
     "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
     "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
@@ -122,7 +122,7 @@ async def gchat(client: Client, message: Message):
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
 
-@Client.on_message(filters.command("gchat", prefix) & filters.me)
+@Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
     """Manages gchat commands."""
     try:
@@ -154,7 +154,7 @@ async def gchat_command(client: Client, message: Message):
             db.set(collection, "gchat_for_all", gchat_for_all)
             await message.edit_text(f"gchat is now {'enabled' if gchat_for_all else 'disabled'} for all users.")
         else:
-            await message.edit_text(f"Usage: {prefix}gchat `on`, `off`, `del`, or `all`.")
+            await message.edit_text(f"<b>Usage:</b> {prefix}gchat `on`, `off`, `del`, or `all`.")
 
         await asyncio.sleep(1)
         await message.delete()
@@ -222,7 +222,7 @@ async def set_gemini_key(client: Client, message: Message):
         else:
             keys_list = "\n".join([f"{i + 1}. {key}" for i, key in enumerate(gemini_keys)])
             current_key = gemini_keys[current_key_index] if gemini_keys else "None"
-            await message.edit_text(f"Available Gemini API keys:\n{keys_list}\n\nCurrent key: {current_key}")
+            await message.edit_text(f"<b>Gemini API keys:</b>\n\n<code>{keys_list}</code>\n\n<b>Current key:</b> <code>{current_key}</code>")
 
         await asyncio.sleep(1)
     except Exception as e:
