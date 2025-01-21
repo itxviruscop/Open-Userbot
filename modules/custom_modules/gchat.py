@@ -47,104 +47,80 @@ enabled_users = db.get(collection, "enabled_users") or []
 disabled_users = db.get(collection, "disabled_users") or []
 gchat_for_all = db.get(collection, "gchat_for_all") or False
 
+def get_chat_history(user_id, bot_role, user_message, user_name):
+    chat_history = db.get(collection, f"chat_history.{user_id}") or [f"Role: {bot_role}"]
+    chat_history.append(f"{user_name}: {user_message}")
+    db.set(collection, f"chat_history.{user_id}", chat_history)
+    return chat_history
+
+async def send_typing_action(client, chat_id, user_message):
+    await client.send_chat_action(chat_id=chat_id, action=enums.ChatAction.TYPING)
+    await asyncio.sleep(min(len(user_message) / 10, 5))
+
+async def handle_voice_message(client, chat_id, bot_response):
+    if bot_response.startswith(".el"):
+        try:
+            audio_path = await generate_elevenlabs_audio(text=bot_response[3:])
+            if audio_path:
+                await client.send_voice(chat_id=chat_id, voice=audio_path)
+                os.remove(audio_path)
+                return True
+        except Exception:
+            bot_response = bot_response[3:].strip()  # Trim the .el command
+            await client.send_message(chat_id, bot_response)
+            return True
+    return False
 
 @Client.on_message(filters.text & filters.private & ~filters.me & ~filters.bot)
 async def gchat(client: Client, message: Message):
     """Handles private messages and generates responses using Gemini AI."""
     try:
-        user_id = message.from_user.id
-        user_name = message.from_user.first_name or "User"
-        user_message = message.text.strip()
+        user_id, user_name, user_message = message.from_user.id, message.from_user.first_name or "User", message.text.strip()
 
         # Priority: Disabled users > Enabled users > Global gchat_for_all
-        if user_id in disabled_users:
-            return
-        if not gchat_for_all and user_id not in enabled_users:
+        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
             return
 
-        # Retrieve role and chat history
         bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
-        chat_history = db.get(collection, f"chat_history.{user_id}") or [
-            f"Role: {bot_role}"
-        ]
+        chat_history = get_chat_history(user_id, bot_role, user_message, user_name)
 
-        # Append the user message to chat history
-        chat_history.append(f"{user_name}: {user_message}")
-        db.set(collection, f"chat_history.{user_id}", chat_history)
+        await asyncio.sleep(random.choice([4, 8, 10]))  # Add random delay before simulating typing
+        await send_typing_action(client, message.chat.id, user_message)
 
-        # Add random delay before simulating typing
-        delay = random.choice([4, 8, 10])
-        await asyncio.sleep(delay)
-
-        # Simulate typing
-        await client.send_chat_action(
-            chat_id=message.chat.id, action=enums.ChatAction.TYPING
-        )
-        await asyncio.sleep(min(len(user_message) / 10, 5))
-
-        # Retry logic for handling 429 errors and invalid keys
         gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
         current_key_index = db.get(collection, "current_key_index") or 0
         retries = len(gemini_keys) * 2
 
         while retries > 0:
             try:
-                # Configure Gemini API with the current key
                 current_key = gemini_keys[current_key_index]
                 genai.configure(api_key=current_key)
-
-                # Reinitialize the genai object
                 global model
                 model = genai.GenerativeModel("gemini-2.0-flash-exp")
                 model.safety_settings = safety_settings
 
-                # Generate a response
                 chat_context = "\n".join(chat_history)
-                chat = model.start_chat()
-                response = chat.send_message(chat_context)
+                response = model.start_chat().send_message(chat_context)
                 bot_response = response.text.strip()
 
-                # Append the bot response to chat history
                 chat_history.append(bot_response)
                 db.set(collection, f"chat_history.{user_id}", chat_history)
 
-                # Check for ElevenLabs voice message
-                if bot_response.startswith(".el"):
-                    try:
-                        audio_path = await generate_elevenlabs_audio(
-                            text=bot_response[3:]
-                        )
-                        if audio_path:
-                            await client.send_voice(
-                                chat_id=message.chat.id, voice=audio_path
-                            )
-                            os.remove(audio_path)
-                            return
-                    except Exception as e:
-                        # Send the plain message text if voice generation fails
-                        bot_response = bot_response[3:].strip()  # Trim the .el command
-                        await message.reply_text(bot_response)
-                        return
+                if await handle_voice_message(client, message.chat.id, bot_response):
+                    return
 
                 return await message.reply_text(bot_response)
-
             except Exception as e:
-                # Check if the error is due to rate limits or invalid keys
                 if "429" in str(e) or "invalid" in str(e).lower():
                     retries -= 1
-                    if retries % 2 == 0:  # Switch key after 2 retries
+                    if retries % 2 == 0:
                         current_key_index = (current_key_index + 1) % len(gemini_keys)
                         db.set(collection, "current_key_index", current_key_index)
                     await asyncio.sleep(4)  # Add a 4-second delay before retrying
-                    continue
-                # If it's not a 429 error or invalid key error, raise the exception
-                raise e
-
+                else:
+                    raise e
     except Exception as e:
-        return await client.send_message(
-            "me", f"An error occurred in the `gchat` module:\n\n{str(e)}"
-        )
-
+        return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
 
 @Client.on_message(filters.command("gchat", prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
@@ -176,22 +152,14 @@ async def gchat_command(client: Client, message: Message):
             global gchat_for_all
             gchat_for_all = not gchat_for_all
             db.set(collection, "gchat_for_all", gchat_for_all)
-            await message.edit_text(
-                f"gchat is now {'enabled' if gchat_for_all else 'disabled'} for all users."
-            )
+            await message.edit_text(f"gchat is now {'enabled' if gchat_for_all else 'disabled'} for all users.")
         else:
-            await message.edit_text(
-                f"Usage: {prefix}gchat `on`, `off`, `del`, or `all`."
-            )
+            await message.edit_text(f"Usage: {prefix}gchat `on`, `off`, `del`, or `all`.")
 
         await asyncio.sleep(1)
         await message.delete()
-
     except Exception as e:
-        await client.send_message(
-            "me", f"An error occurred in the `gchat` command:\n\n{str(e)}"
-        )
-
+        await client.send_message("me", f"An error occurred in the `gchat` command:\n\n{str(e)}")
 
 @Client.on_message(filters.command("role", prefix) & filters.me)
 async def set_custom_role(client: Client, message: Message):
@@ -200,7 +168,6 @@ async def set_custom_role(client: Client, message: Message):
         custom_role = message.text[len(f"{prefix}role ") :].strip()
         user_id = message.chat.id
 
-        # Reset to default role if no role is provided
         if not custom_role:
             db.set(collection, f"custom_roles.{user_id}", default_bot_role)
             db.set(collection, f"chat_history.{user_id}", None)
@@ -208,44 +175,33 @@ async def set_custom_role(client: Client, message: Message):
         else:
             db.set(collection, f"custom_roles.{user_id}", custom_role)
             db.set(collection, f"chat_history.{user_id}", None)
-            await message.edit_text(
-                f"Role set successfully!\n<b>New Role:</b> {custom_role}"
-            )
+            await message.edit_text(f"Role set successfully!\n<b>New Role:</b> {custom_role}")
 
         await asyncio.sleep(1)
         await message.delete()
-
     except Exception as e:
-        await client.send_message(
-            "me", f"An error occurred in the `role` command:\n\n{str(e)}"
-        )
-
+        await client.send_message("me", f"An error occurred in the `role` command:\n\n{str(e)}")
 
 @Client.on_message(filters.command("setgkey", prefix) & filters.me)
 async def set_gemini_key(client: Client, message: Message):
     """Sets a new Gemini API key, sets the current key, deletes a key, or displays all available keys."""
     try:
         command = message.text.strip().split()
-        subcommand = command[1] if len(command) > 1 else None
-        key = command[2] if len(command) > 2 else None
+        subcommand, key = command[1] if len(command) > 1 else None, command[2] if len(command) > 2 else None
 
         gemini_keys = db.get(collection, "gemini_keys") or []
         current_key_index = db.get(collection, "current_key_index") or 0
 
         if subcommand == "add" and key:
-            # Add the new key to the list
             gemini_keys.append(key)
             db.set(collection, "gemini_keys", gemini_keys)
-            await message.edit_text(f"New Gemini API key added successfully!")
+            await message.edit_text("New Gemini API key added successfully!")
         elif subcommand == "set" and key:
-            # Set the current key and reconfigure the Gemini API
             index = int(key) - 1
             if 0 <= index < len(gemini_keys):
                 current_key_index = index
                 db.set(collection, "current_key_index", current_key_index)
-                current_key = gemini_keys[current_key_index]
-                genai.configure(api_key=current_key)
-                # Force re-initialize the genai object
+                genai.configure(api_key=gemini_keys[current_key_index])
                 global model
                 model = genai.GenerativeModel("gemini-2.0-flash-exp")
                 model.safety_settings = safety_settings
@@ -253,12 +209,10 @@ async def set_gemini_key(client: Client, message: Message):
             else:
                 await message.edit_text(f"Invalid key index: {key}.")
         elif subcommand == "del" and key:
-            # Delete the specified key
             index = int(key) - 1
             if 0 <= index < len(gemini_keys):
                 del gemini_keys[index]
                 db.set(collection, "gemini_keys", gemini_keys)
-                # Adjust current key index if necessary
                 if current_key_index >= len(gemini_keys):
                     current_key_index = max(0, len(gemini_keys) - 1)
                     db.set(collection, "current_key_index", current_key_index)
@@ -266,20 +220,13 @@ async def set_gemini_key(client: Client, message: Message):
             else:
                 await message.edit_text(f"Invalid key index: {key}.")
         else:
-            # Display all available keys and the current key
             keys_list = "\n".join([f"{i + 1}. {key}" for i, key in enumerate(gemini_keys)])
             current_key = gemini_keys[current_key_index] if gemini_keys else "None"
-            await message.edit_text(
-                f"Available Gemini API keys:\n{keys_list}\n\nCurrent key: {current_key}"
-            )
+            await message.edit_text(f"Available Gemini API keys:\n{keys_list}\n\nCurrent key: {current_key}")
 
         await asyncio.sleep(1)
-
     except Exception as e:
-        await client.send_message(
-            "me", f"An error occurred in the `setgkey` command:\n\n{str(e)}"
-        )
-
+        await client.send_message("me", f"An error occurred in the `setgkey` command:\n\n{str(e)}")
 
 modules_help["gchat"] = {
     "gchat on": "Enable gchat for the current user in the chat.",
