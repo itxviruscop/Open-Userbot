@@ -7,12 +7,10 @@ from utils.scripts import import_library
 from utils.config import gemini_key
 from utils.db import db
 from utils.misc import modules_help, prefix
-
 from modules.custom_modules.elevenlabs import generate_elevenlabs_audio
 
 # Import and configure the Gemini AI API
 genai = import_library("google.generativeai", "google-generativeai")
-genai.configure(api_key=gemini_key)
 
 # Safety settings for the Gemini model
 safety_settings = [
@@ -36,7 +34,7 @@ default_bot_role = (
     "Write short, casual messages like a real human; your response should be a maximum of one line. "
     "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
     "You can send voice messages too (just type .el before a message, and it will be auto-converted into voice). "
-    "Rarely send voice messages, rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. (you are currently talking them on telegram.)"
+    "Rarely send voice messages, rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. "
     "Your messages will always contain the history of our chat, where the user's name is labeled. "
     "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
     "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
@@ -84,10 +82,22 @@ async def gchat(client: Client, message: Message):
         )
         await asyncio.sleep(min(len(user_message) / 10, 5))
 
-        # Retry logic for handling 429 errors
-        retries = 3
+        # Retry logic for handling 429 errors and invalid keys
+        gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
+        current_key_index = db.get(collection, "current_key_index") or 0
+        retries = len(gemini_keys) * 2
+
         while retries > 0:
             try:
+                # Configure Gemini API with the current key
+                current_key = gemini_keys[current_key_index]
+                genai.configure(api_key=current_key)
+
+                # Reinitialize the genai object
+                global model
+                model = genai.GenerativeModel("gemini-2.0-flash-exp")
+                model.safety_settings = safety_settings
+
                 # Generate a response
                 chat_context = "\n".join(chat_history)
                 chat = model.start_chat()
@@ -119,13 +129,15 @@ async def gchat(client: Client, message: Message):
                 return await message.reply_text(bot_response)
 
             except Exception as e:
-                # Check if the error is due to rate limits
-                if "429" in str(e):
+                # Check if the error is due to rate limits or invalid keys
+                if "429" in str(e) or "invalid" in str(e).lower():
                     retries -= 1
-                    backoff = random.uniform(5, 8)
-                    await asyncio.sleep(backoff)
+                    if retries % 2 == 0:  # Switch key after 2 retries
+                        current_key_index = (current_key_index + 1) % len(gemini_keys)
+                        db.set(collection, "current_key_index", current_key_index)
+                    await asyncio.sleep(4)  # Add a 4-second delay before retrying
                     continue
-                # If it's not a 429 error, raise the exception
+                # If it's not a 429 error or invalid key error, raise the exception
                 raise e
 
     except Exception as e:
@@ -209,10 +221,74 @@ async def set_custom_role(client: Client, message: Message):
         )
 
 
+@Client.on_message(filters.command("setgkey", prefix) & filters.me)
+async def set_gemini_key(client: Client, message: Message):
+    """Sets a new Gemini API key, sets the current key, deletes a key, or displays all available keys."""
+    try:
+        command = message.text.strip().split()
+        subcommand = command[1] if len(command) > 1 else None
+        key = command[2] if len(command) > 2 else None
+
+        gemini_keys = db.get(collection, "gemini_keys") or []
+        current_key_index = db.get(collection, "current_key_index") or 0
+
+        if subcommand == "add" and key:
+            # Add the new key to the list
+            gemini_keys.append(key)
+            db.set(collection, "gemini_keys", gemini_keys)
+            await message.edit_text(f"New Gemini API key added successfully!")
+        elif subcommand == "set" and key:
+            # Set the current key and reconfigure the Gemini API
+            index = int(key) - 1
+            if 0 <= index < len(gemini_keys):
+                current_key_index = index
+                db.set(collection, "current_key_index", current_key_index)
+                current_key = gemini_keys[current_key_index]
+                genai.configure(api_key=current_key)
+                # Force re-initialize the genai object
+                global model
+                model = genai.GenerativeModel("gemini-2.0-flash-exp")
+                model.safety_settings = safety_settings
+                await message.edit_text(f"Current Gemini API key set to key {key}.")
+            else:
+                await message.edit_text(f"Invalid key index: {key}.")
+        elif subcommand == "del" and key:
+            # Delete the specified key
+            index = int(key) - 1
+            if 0 <= index < len(gemini_keys):
+                del gemini_keys[index]
+                db.set(collection, "gemini_keys", gemini_keys)
+                # Adjust current key index if necessary
+                if current_key_index >= len(gemini_keys):
+                    current_key_index = max(0, len(gemini_keys) - 1)
+                    db.set(collection, "current_key_index", current_key_index)
+                await message.edit_text(f"Gemini API key {key} deleted successfully!")
+            else:
+                await message.edit_text(f"Invalid key index: {key}.")
+        else:
+            # Display all available keys and the current key
+            keys_list = "\n".join([f"{i + 1}. {key}" for i, key in enumerate(gemini_keys)])
+            current_key = gemini_keys[current_key_index] if gemini_keys else "None"
+            await message.edit_text(
+                f"Available Gemini API keys:\n{keys_list}\n\nCurrent key: {current_key}"
+            )
+
+        await asyncio.sleep(1)
+
+    except Exception as e:
+        await client.send_message(
+            "me", f"An error occurred in the `setgkey` command:\n\n{str(e)}"
+        )
+
+
 modules_help["gchat"] = {
     "gchat on": "Enable gchat for the current user in the chat.",
     "gchat off": "Disable gchat for the current user in the chat.",
     "gchat del": "Delete the chat history for the current user.",
     "gchat all": "Toggle gchat for all users globally.",
     "role <custom role>": "Set a custom role for the bot and clear existing chat history.",
+    "setgkey add <key>": "Add a new Gemini API key.",
+    "setgkey set <index>": "Set the current Gemini API key by index.",
+    "setgkey del <index>": "Delete a Gemini API key by index.",
+    "setgkey": "Display all available Gemini API keys and the current key."
 }
