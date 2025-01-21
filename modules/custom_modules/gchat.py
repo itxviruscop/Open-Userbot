@@ -111,9 +111,10 @@ async def gchat(client: Client, message: Message):
                             os.remove(audio_path)
                             return
                     except Exception as e:
-                        return await client.send_message(
-                            "me", f"Error: {e}", parse_mode=enums.ParseMode.MARKDOWN
-                        )
+                        # Send the plain message text if voice generation fails
+                        bot_response = bot_response[3:].strip()  # Trim the .el command
+                        await message.reply_text(bot_response)
+                        return
 
                 return await message.reply_text(bot_response)
 
