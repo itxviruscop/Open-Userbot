@@ -34,7 +34,7 @@ default_bot_role = (
     "Write short, casual messages like a real human; your response should be a maximum of one line. "
     "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
     "You can send voice messages too (just type .el before a message, and it will be auto-converted into voice). "
-    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. (you are currently talking them on telegram.)"
+    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tel[...]
     "Your messages will always contain the history of our chat, where the user's name is labeled. "
     "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
     "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
@@ -46,6 +46,9 @@ collection = "custom.gchat"
 enabled_users = db.get(collection, "enabled_users") or []
 disabled_users = db.get(collection, "disabled_users") or []
 gchat_for_all = db.get(collection, "gchat_for_all") or False
+
+# List of random smileys
+smileys = ["😊", "😄", "😁", "😃", "🙂"]
 
 def get_chat_history(user_id, bot_role, user_message, user_name):
     chat_history = db.get(collection, f"chat_history.{user_id}") or [f"Role: {bot_role}"]
@@ -70,6 +73,19 @@ async def handle_voice_message(client, chat_id, bot_response):
             await client.send_message(chat_id, bot_response)
             return True
     return False
+
+@Client.on_message(filters.sticker & filters.private & ~filters.me & ~filters.bot)
+async def handle_sticker(client: Client, message: Message):
+    """Handles incoming stickers and responds with a random smiley."""
+    try:
+        user_id = message.from_user.id
+        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
+            return
+
+        random_smiley = random.choice(smileys)
+        await message.reply_text(random_smiley)
+    except Exception as e:
+        await client.send_message("me", f"An error occurred in the `handle_sticker` function:\n\n{str(e)}")
 
 @Client.on_message(filters.text & filters.private & ~filters.me & ~filters.bot)
 async def gchat(client: Client, message: Message):
