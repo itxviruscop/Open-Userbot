@@ -34,7 +34,7 @@ default_bot_role = (
     "Write short, casual messages like a real human; your response should be a maximum of one line. "
     "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
     "You can send voice messages too (just type .el before a message, and it will be auto-converted into voice). "
-    "Rarely send voice messages, rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. (you are currently talking them on telegram.)"
+    "Rarely send voice messages, rarely use emojis, and rarely use person's name in message so it can feel like human. You don't call and if they ask for picture you can tell them to check your profile. "
     "Your messages will always contain the history of our chat, where the user's name is labeled. "
     "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
     "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
@@ -126,8 +126,9 @@ async def gchat(client: Client, message: Message):
 async def gchat_command(client: Client, message: Message):
     """Manages gchat commands."""
     try:
-        command = message.text.strip().split(maxsplit=1)[-1].lower()
-        user_id = message.chat.id
+        parts = message.text.strip().split()
+        command = parts[1].lower()
+        user_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else message.chat.id
 
         if command == "on":
             if user_id in disabled_users:
@@ -136,7 +137,7 @@ async def gchat_command(client: Client, message: Message):
             if user_id not in enabled_users:
                 enabled_users.append(user_id)
                 db.set(collection, "enabled_users", enabled_users)
-            await message.edit_text("<b>gchat is enabled.</b>")
+            await message.edit_text(f"<b>gchat is enabled for user {user_id}.</b>")
         elif command == "off":
             if user_id not in disabled_users:
                 disabled_users.append(user_id)
@@ -144,17 +145,17 @@ async def gchat_command(client: Client, message: Message):
             if user_id in enabled_users:
                 enabled_users.remove(user_id)
                 db.set(collection, "enabled_users", enabled_users)
-            await message.edit_text("<b>gchat is disabled.</b>")
+            await message.edit_text(f"<b>gchat is disabled for user {user_id}.</b>")
         elif command == "del":
             db.set(collection, f"chat_history.{user_id}", None)
-            await message.edit_text("<b>Chat history deleted.</b>")
+            await message.edit_text(f"<b>Chat history deleted for user {user_id}.</b>")
         elif command == "all":
             global gchat_for_all
             gchat_for_all = not gchat_for_all
             db.set(collection, "gchat_for_all", gchat_for_all)
             await message.edit_text(f"gchat is now {'enabled' if gchat_for_all else 'disabled'} for all users.")
         else:
-            await message.edit_text(f"<b>Usage:</b> {prefix}gchat `on`, `off`, `del`, or `all`.")
+            await message.edit_text(f"<b>Usage:</b> {prefix}gchat `on`, `off`, `del`, or `all` [user_id].")
 
         await asyncio.sleep(1)
         await message.delete()
@@ -165,17 +166,18 @@ async def gchat_command(client: Client, message: Message):
 async def set_custom_role(client: Client, message: Message):
     """Sets or resets a custom role for the bot."""
     try:
-        custom_role = message.text[len(f"{prefix}role ") :].strip()
-        user_id = message.chat.id
+        parts = message.text.strip().split()
+        custom_role = " ".join(parts[2:]).strip()
+        user_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else message.chat.id
 
         if not custom_role:
             db.set(collection, f"custom_roles.{user_id}", default_bot_role)
             db.set(collection, f"chat_history.{user_id}", None)
-            await message.edit_text("Role reset to default.")
+            await message.edit_text(f"Role reset to default for user {user_id}.")
         else:
             db.set(collection, f"custom_roles.{user_id}", custom_role)
             db.set(collection, f"chat_history.{user_id}", None)
-            await message.edit_text(f"Role set successfully!\n<b>New Role:</b> {custom_role}")
+            await message.edit_text(f"Role set successfully for user {user_id}!\n<b>New Role:</b> {custom_role}")
 
         await asyncio.sleep(1)
         await message.delete()
@@ -229,11 +231,11 @@ async def set_gemini_key(client: Client, message: Message):
         await client.send_message("me", f"An error occurred in the `setgkey` command:\n\n{str(e)}")
 
 modules_help["gchat"] = {
-    "gchat on": "Enable gchat for the current user in the chat.",
-    "gchat off": "Disable gchat for the current user in the chat.",
-    "gchat del": "Delete the chat history for the current user.",
+    "gchat on [user_id]": "Enable gchat for the specified user or current user in the chat.",
+    "gchat off [user_id]": "Disable gchat for the specified user or current user in the chat.",
+    "gchat del [user_id]": "Delete the chat history for the specified user or current user.",
     "gchat all": "Toggle gchat for all users globally.",
-    "role <custom role>": "Set a custom role for the bot and clear existing chat history.",
+    "role [user_id] <custom role>": "Set a custom role for the bot for the specified user or current user and clear existing chat history.",
     "setgkey add <key>": "Add a new Gemini API key.",
     "setgkey set <index>": "Set the current Gemini API key by index.",
     "setgkey del <index>": "Delete a Gemini API key by index.",
