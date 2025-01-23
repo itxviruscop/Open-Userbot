@@ -144,8 +144,8 @@ async def gchat(client: Client, message: Message):
 
 
 @Client.on_message(filters.photo & filters.private & ~filters.me & ~filters.bot)
-async def handle_image(client: Client, message: Message):
-    """Handles incoming images and generates responses using Gemini AI."""
+async def handle_images(client: Client, message: Message):
+    """Handles incoming images and generates responses for single or multiple images using Gemini AI."""
     try:
         user_id, user_name = message.from_user.id, message.from_user.first_name or "User"
 
@@ -156,20 +156,18 @@ async def handle_image(client: Client, message: Message):
         bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
         chat_history = get_chat_history(user_id, bot_role, "", user_name)
 
-        await asyncio.sleep(random.choice([4, 8, 10]))  # Add random delay before simulating typing
-        await send_typing_action(client, message.chat.id, "image")
+        # Wait for more pictures in the frame (5 seconds)
+        await asyncio.sleep(5)
 
-        # Collect all images within a 5-second delay
-        global collected_images
-        start_time = datetime.datetime.utcnow()
-        while (datetime.datetime.utcnow() - start_time).total_seconds() < 5:
-            collected_images.append(await client.download_media(message.photo))
-            new_message = await client.listen(message.chat.id, filters.photo & filters.private & ~filters.me & ~filters.bot, timeout=5)
-            if new_message:
-                message = new_message
+        # Collect all images sent within the time frame
+        messages = await client.get_chat_history(message.chat.id, limit=10)  # Adjust limit as needed
+        image_paths = []
+        for msg in messages:
+            if msg.photo and msg.date >= message.date:
+                image_paths.append(await client.download_media(msg.photo))
 
         # Open all images using PIL
-        sample_images = [Image.open(image_path) for image_path in collected_images]
+        sample_images = [Image.open(image_path) for image_path in image_paths]
 
         gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
         current_key_index = db.get(collection, "current_key_index") or 0
@@ -184,7 +182,11 @@ async def handle_image(client: Client, message: Message):
                 model.safety_settings = safety_settings
 
                 chat_context = "\n".join(chat_history)
-                prompt = f"{chat_context}\n\nUser has sent multiple images, and reply accordingly. Follow bot role, talk like human. Don't explain what the pictures are about. Just ask questions about them."
+                prompt = (
+                    f"{chat_context}\n\nUser has sent multiple images. Generate a response based on the content "
+                    "of the images. Follow the bot role, and talk like a human. Do not explain what the pictures are about; "
+                    "instead, ask thoughtful or conversational questions related to them."
+                )
                 response = model.generate_content([prompt] + sample_images)
                 bot_response = response.text.strip()
 
@@ -194,7 +196,6 @@ async def handle_image(client: Client, message: Message):
                 if await handle_voice_message(client, message.chat.id, bot_response):
                     return
 
-                collected_images = []  # Clear the collected images after processing
                 return await message.reply_text(bot_response)
             except Exception as e:
                 if "429" in str(e) or "invalid" in str(e).lower():
@@ -206,8 +207,7 @@ async def handle_image(client: Client, message: Message):
                 else:
                     raise e
     except Exception as e:
-        return await client.send_message("me", f"An error occurred in the `handle_image` function:\n\n{str(e)}")
-        
+        return await client.send_message("me", f"An error occurred in the `handle_images` function:\n\n{str(e)}")
 @Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
     """Manages gchat commands."""
