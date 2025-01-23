@@ -1,6 +1,7 @@
 import asyncio
 import os
 import random
+from PIL import Image
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from utils.scripts import import_library
@@ -61,6 +62,34 @@ async def handle_voice_message(client, chat_id, bot_response):
             return True
     return False
 
+async def handle_image_message(client, message):
+    """Handles incoming image messages and generates responses using Gemini AI."""
+    user_id = message.from_user.id
+    if user_id not in disabled_users and (gchat_for_all or user_id in enabled_users):
+        bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
+        chat_history = get_chat_history(user_id, bot_role, "Sent an image", message.from_user.first_name or "User")
+        
+        # Download the image file
+        image_path = await message.download()
+        
+        # Load the image
+        sample_file = Image.open(image_path)
+
+        # Generate response using Gemini AI
+        prompt = "Respond to the image according to our chat."
+        genai.configure(api_key=gemini_key)
+        response = model.generate_content([prompt, sample_file])
+        
+        bot_response = response.text.strip()
+        chat_history.append(bot_response)
+        db.set(collection, f"chat_history.{user_id}", chat_history)
+        
+        await send_typing_action(client, message.chat.id, bot_response)
+        await message.reply_text(bot_response)
+        
+        # Clean up the downloaded image
+        os.remove(image_path)
+
 @Client.on_message(filters.sticker & filters.private & ~filters.me & ~filters.bot)
 async def handle_sticker(client: Client, message: Message):
     """Handles incoming stickers and responds with a random smiley."""
@@ -71,6 +100,14 @@ async def handle_sticker(client: Client, message: Message):
             await message.reply_text(random.choice(smileys))
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `handle_sticker` function:\n\n{str(e)}")
+
+@Client.on_message(filters.photo & filters.private & ~filters.me & ~filters.bot)
+async def handle_photo(client: Client, message: Message):
+    """Handles incoming photo messages."""
+    try:
+        await handle_image_message(client, message)
+    except Exception as e:
+        await client.send_message("me", f"An error occurred in the `handle_photo` function:\n\n{str(e)}")
 
 @Client.on_message(filters.text & filters.private & ~filters.me & ~filters.bot)
 async def gchat(client: Client, message: Message):
