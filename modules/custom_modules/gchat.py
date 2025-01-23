@@ -1,7 +1,6 @@
 import asyncio
 import os
 import random
-import datetime
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from utils.scripts import import_library
@@ -13,8 +12,7 @@ from PIL import Image
 
 # Import and configure the Gemini AI API
 genai = import_library("google.generativeai", "google-generativeai")
-# Store collected images in memory
-collected_images = []
+
 # Safety settings for the Gemini model
 safety_settings = [
     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
@@ -142,7 +140,6 @@ async def gchat(client: Client, message: Message):
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
 
-
 @Client.on_message(filters.photo & filters.private & ~filters.me & ~filters.bot)
 async def handle_images(client: Client, message: Message):
     """Handles incoming images and generates responses for single or multiple images using Gemini AI."""
@@ -208,6 +205,7 @@ async def handle_images(client: Client, message: Message):
                     raise e
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `handle_images` function:\n\n{str(e)}")
+        
 @Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
     """Manages gchat commands."""
