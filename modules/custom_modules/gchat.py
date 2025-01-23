@@ -159,7 +159,7 @@ async def handle_image(client: Client, message: Message):
         # Collect all images within a 5-second delay
         image_paths = []
         start_time = message.date
-        while (message.date - start_time).total_seconds() < 5:
+        while (datetime.datetime.utcnow() - start_time).total_seconds() < 5:
             image_paths.append(await client.download_media(message.photo))
             new_message = await client.listen(message.chat.id, filters.photo & filters.private & ~filters.me & ~filters.bot, timeout=5)
             if new_message:
