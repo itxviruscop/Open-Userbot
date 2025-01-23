@@ -156,11 +156,11 @@ async def handle_image(client: Client, message: Message):
         await asyncio.sleep(random.choice([4, 8, 10]))  # Add random delay before simulating typing
         await send_typing_action(client, message.chat.id, "image")
 
-        # Download the image
-        image_path = await message.download()
+        # Download all images
+        image_paths = await asyncio.gather(*[client.download_media(photo) for photo in message.photo])
 
-        # Open the image using PIL
-        sample_image = Image.open(image_path)
+        # Open all images using PIL
+        sample_images = [Image.open(image_path) for image_path in image_paths]
 
         gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
         current_key_index = db.get(collection, "current_key_index") or 0
@@ -175,8 +175,8 @@ async def handle_image(client: Client, message: Message):
                 model.safety_settings = safety_settings
 
                 chat_context = "\n".join(chat_history)
-                prompt = f"Respond to this image based on the chat context: {chat_context}"
-                response = model.generate_content([prompt, sample_image])
+                prompt = f"{chat_context}\n\n User has sent image, and reply accordingly, must follow bot role, talk like human. don't explain what is it picture about. just ask question about it, or appreciate it."
+                response = model.generate_content([prompt] + sample_images)
                 bot_response = response.text.strip()
 
                 chat_history.append(bot_response)
@@ -197,7 +197,7 @@ async def handle_image(client: Client, message: Message):
                     raise e
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `handle_image` function:\n\n{str(e)}")
-
+        
 @Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
     """Manages gchat commands."""
