@@ -156,10 +156,14 @@ async def handle_image(client: Client, message: Message):
         await asyncio.sleep(random.choice([4, 8, 10]))  # Add random delay before simulating typing
         await send_typing_action(client, message.chat.id, "image")
 
-        # Download all images
+        # Collect all images within a 5-second delay
         image_paths = []
-        for photo in message.photo:
-            image_paths.append(await client.download_media(photo))
+        start_time = message.date
+        while (message.date - start_time).total_seconds() < 5:
+            image_paths.append(await client.download_media(message.photo))
+            new_message = await client.listen(message.chat.id, filters.photo & filters.private & ~filters.me & ~filters.bot, timeout=5)
+            if new_message:
+                message = new_message
 
         # Open all images using PIL
         sample_images = [Image.open(image_path) for image_path in image_paths]
@@ -177,7 +181,7 @@ async def handle_image(client: Client, message: Message):
                 model.safety_settings = safety_settings
 
                 chat_context = "\n".join(chat_history)
-                prompt = f"{chat_context}\n\n User has sent image, and reply accordingly, must follow bot role, talk like human. don't explain what is it picture about. just ask question about it."
+                prompt = f"{chat_context}\n\nUser has sent multiple images, and reply accordingly. Follow bot role, talk like human. Don't explain what the pictures are about. Just ask questions about them."
                 response = model.generate_content([prompt] + sample_images)
                 bot_response = response.text.strip()
 
