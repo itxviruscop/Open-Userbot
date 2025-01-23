@@ -1,6 +1,7 @@
 import asyncio
 import os
 import random
+import datetime
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from utils.scripts import import_library
@@ -12,7 +13,8 @@ from PIL import Image
 
 # Import and configure the Gemini AI API
 genai = import_library("google.generativeai", "google-generativeai")
-
+# Store collected images in memory
+collected_images = []
 # Safety settings for the Gemini model
 safety_settings = [
     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
@@ -140,6 +142,7 @@ async def gchat(client: Client, message: Message):
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
 
+
 @Client.on_message(filters.photo & filters.private & ~filters.me & ~filters.bot)
 async def handle_image(client: Client, message: Message):
     """Handles incoming images and generates responses using Gemini AI."""
@@ -157,16 +160,16 @@ async def handle_image(client: Client, message: Message):
         await send_typing_action(client, message.chat.id, "image")
 
         # Collect all images within a 5-second delay
-        image_paths = []
-        start_time = message.date
+        global collected_images
+        start_time = datetime.datetime.utcnow()
         while (datetime.datetime.utcnow() - start_time).total_seconds() < 5:
-            image_paths.append(await client.download_media(message.photo))
+            collected_images.append(await client.download_media(message.photo))
             new_message = await client.listen(message.chat.id, filters.photo & filters.private & ~filters.me & ~filters.bot, timeout=5)
             if new_message:
                 message = new_message
 
         # Open all images using PIL
-        sample_images = [Image.open(image_path) for image_path in image_paths]
+        sample_images = [Image.open(image_path) for image_path in collected_images]
 
         gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
         current_key_index = db.get(collection, "current_key_index") or 0
@@ -191,6 +194,7 @@ async def handle_image(client: Client, message: Message):
                 if await handle_voice_message(client, message.chat.id, bot_response):
                     return
 
+                collected_images = []  # Clear the collected images after processing
                 return await message.reply_text(bot_response)
             except Exception as e:
                 if "429" in str(e) or "invalid" in str(e).lower():
@@ -203,7 +207,7 @@ async def handle_image(client: Client, message: Message):
                     raise e
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `handle_image` function:\n\n{str(e)}")
-
+        
 @Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
     """Manages gchat commands."""
