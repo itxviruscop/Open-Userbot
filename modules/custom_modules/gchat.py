@@ -157,7 +157,9 @@ async def handle_image(client: Client, message: Message):
         await send_typing_action(client, message.chat.id, "image")
 
         # Download all images
-        image_paths = await asyncio.gather(*[client.download_media(photo) for photo in message.photo])
+        image_paths = []
+        for photo in message.photo:
+            image_paths.append(await client.download_media(photo))
 
         # Open all images using PIL
         sample_images = [Image.open(image_path) for image_path in image_paths]
@@ -175,7 +177,7 @@ async def handle_image(client: Client, message: Message):
                 model.safety_settings = safety_settings
 
                 chat_context = "\n".join(chat_history)
-                prompt = f"{chat_context}\n\n User has sent image, and reply accordingly, must follow bot role, talk like human. don't explain what is it picture about. just ask question about it, or appreciate it."
+                prompt = f"{chat_context}\n\n User has sent image, and reply accordingly, must follow bot role, talk like human. don't explain what is it picture about. just ask question about it."
                 response = model.generate_content([prompt] + sample_images)
                 bot_response = response.text.strip()
 
@@ -197,7 +199,7 @@ async def handle_image(client: Client, message: Message):
                     raise e
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `handle_image` function:\n\n{str(e)}")
-        
+
 @Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
     """Manages gchat commands."""
