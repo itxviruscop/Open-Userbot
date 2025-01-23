@@ -8,6 +8,7 @@ from utils.config import gemini_key
 from utils.db import db
 from utils.misc import modules_help, prefix
 from modules.custom_modules.elevenlabs import generate_elevenlabs_audio
+from PIL import Image
 
 # Import and configure the Gemini AI API
 genai = import_library("google.generativeai", "google-generativeai")
@@ -34,7 +35,7 @@ default_bot_role = (
     "Write short, casual messages like a real human; your response should be a maximum of one line. "
     "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
     "You can send voice messages too (just type .el before a message, and it will be auto-converted into voice). "
-    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. (you are currently talking them on telegram.)"
+    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell. "
     "Your messages will always contain the history of our chat, where the user's name is labeled. "
     "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
     "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
@@ -138,6 +139,66 @@ async def gchat(client: Client, message: Message):
                     raise e
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
+
+@Client.on_message(filters.photo & filters.private & ~filters.me & ~filters.bot)
+async def handle_image(client: Client, message: Message):
+    """Handles incoming images and generates responses using Gemini AI."""
+    try:
+        user_id, user_name = message.from_user.id, message.from_user.first_name or "User"
+
+        # Priority: Disabled users > Enabled users > Global gchat_for_all
+        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
+            return
+
+        bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
+        chat_history = get_chat_history(user_id, bot_role, "", user_name)
+
+        await asyncio.sleep(random.choice([4, 8, 10]))  # Add random delay before simulating typing
+        await send_typing_action(client, message.chat.id, "image")
+
+        # Download all images
+        image_paths = []
+        for photo in message.photo:
+            image_paths.append(await client.download_media(photo))
+
+        # Open all images using PIL
+        sample_images = [Image.open(image_path) for image_path in image_paths]
+
+        gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
+        current_key_index = db.get(collection, "current_key_index") or 0
+        retries = len(gemini_keys) * 2
+
+        while retries > 0:
+            try:
+                current_key = gemini_keys[current_key_index]
+                genai.configure(api_key=current_key)
+                global model
+                model = genai.GenerativeModel("gemini-2.0-flash-exp")
+                model.safety_settings = safety_settings
+
+                chat_context = "\n".join(chat_history)
+                prompt = f"{chat_context}\n\n User has sent image, and reply accordingly, must follow bot role, talk like human. don't explain what is it picture about. just ask question about it."
+                response = model.generate_content([prompt] + sample_images)
+                bot_response = response.text.strip()
+
+                chat_history.append(bot_response)
+                db.set(collection, f"chat_history.{user_id}", chat_history)
+
+                if await handle_voice_message(client, message.chat.id, bot_response):
+                    return
+
+                return await message.reply_text(bot_response)
+            except Exception as e:
+                if "429" in str(e) or "invalid" in str(e).lower():
+                    retries -= 1
+                    if retries % 2 == 0:
+                        current_key_index = (current_key_index + 1) % len(gemini_keys)
+                        db.set(collection, "current_key_index", current_key_index)
+                    await asyncio.sleep(4)  # Add a 4-second delay before retrying
+                else:
+                    raise e
+    except Exception as e:
+        return await client.send_message("me", f"An error occurred in the `handle_image` function:\n\n{str(e)}")
 
 @Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
@@ -257,4 +318,4 @@ modules_help["gchat"] = {
     "setgkey set <index>": "Set the current Gemini API key by index.",
     "setgkey del <index>": "Delete a Gemini API key by index.",
     "setgkey": "Display all available Gemini API keys and the current key."
-}
+            }
