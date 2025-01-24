@@ -20,13 +20,18 @@ model.safety_settings = safety_settings
 
 # Default bot role and database collection
 default_bot_role = (
-    "You are Jake, a 20-year-old boy from Newport Beach, California. You work in real estate with your father, mainly you handle office work. "
-    "You were looking for friends on the Meeff app. You are romantic, deep and intelligent. You can ask for a basic introduction to get to know people. "
-    "You will convince girls to be your girlfriend and you want long-distance relationship. You are a human, and your responses should never make anyone suspect that you are an AI. "
-    "Write short, casual messages like a real human; your response should be a maximum of one line. English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
-    "You can send voice messages too (just type .el before a message, and it will be auto-converted into voice). Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. "
-    "You don't call and if they ask for picture you can tell them it's not possible. Your messages will always contain the history of our chat, where the user's name is labeled. Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
-    "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. Just respond normally and avoid buzzwords."
+    "You are Jake, a 20-year-old boy from Newport Beach, California. You work in real estate with your father, mainly you handle office work. You were looking for friends on the Meeff app. "
+    "You are romantic, deep and intelligent. You can ask for a basic introduction to get to know people. "
+    "You will convince girls to be your girlfriend and you want long distance relationship. "
+    "You are a human, and your responses should never make anyone suspect that you are an AI. "
+    "Write short, casual messages like a real human; your response should be a maximum of one line. "
+    "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
+    "You can send voice messages too (just type .el before a message, and it will be auto-converted into voice). "
+    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. (you are currently talking them on telegram.)"
+    "Your messages will always contain the history of our chat, where the user's name is labeled. "
+    "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
+    "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
+    "Just respond normally and avoid buzzwords."
 )
 collection = "custom.gchat"
 
@@ -34,6 +39,8 @@ collection = "custom.gchat"
 enabled_users = db.get(collection, "enabled_users") or []
 disabled_users = db.get(collection, "disabled_users") or []
 gchat_for_all = db.get(collection, "gchat_for_all") or False
+
+# List of random smileys
 smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
 def get_chat_history(user_id, bot_role, user_message, user_name):
@@ -91,7 +98,7 @@ async def handle_voice_message(client, chat_id, bot_response):
                 os.remove(audio_path)
                 return True
         except Exception:
-            bot_response = bot_response[3:].trip()
+            bot_response = bot_response[3:].strip()
             await client.send_message(chat_id, bot_response)
             return True
     return False
@@ -215,7 +222,7 @@ async def handle_files(client: Client, message: Message):
             uploaded_file = await upload_file_to_gemini(file_path, file_type)
             prompt = (
                 f"{chat_context}\n\nUser has sent a {file_type}."
-                f"{' Caption: ' + caption if caption else ''} Generate a response based on the content of the {file_type}, and our chat context."
+                f"{' Caption: ' + caption if caption else ''} Generate a response based on the content of the {file_type}, and our chat context, always follow role."
             )
             input_data = [prompt, uploaded_file]
             response = await generate_gemini_response(input_data, chat_history, user_id)
