@@ -27,7 +27,7 @@ default_bot_role = (
     "Write short, casual messages like a real human; your response should be a maximum of one line. "
     "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
     "You can send voice messages too (just type .el before a message, and it will be auto-converted into voice). "
-    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tel[...]
+    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. (you are currently talking them on telegram.)"
     "Your messages will always contain the history of our chat, where the user's name is labeled. "
     "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
     "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
@@ -103,42 +103,6 @@ async def handle_voice_message(client, chat_id, bot_response):
             return True
     return False
 
-async def process_message(client, message, chat_history, user_id, bot_role):
-    await asyncio.sleep(random.choice([4, 8, 10]))
-    await send_typing_action(client, message.chat.id, message.text.strip())
-
-    gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
-    current_key_index = db.get(collection, "current_key_index") or 0
-    retries = len(gemini_keys) * 2
-
-    while retries > 0:
-        try:
-            current_key = gemini_keys[current_key_index]
-            genai.configure(api_key=current_key)
-            model = genai.GenerativeModel("gemini-2.0-flash-exp")
-            model.safety_settings = safety_settings
-
-            chat_context = "\n".join(chat_history)
-            response = model.start_chat().send_message(chat_context)
-            bot_response = response.text.strip()
-
-            chat_history.append(bot_response)
-            db.set(collection, f"chat_history.{user_id}", chat_history)
-
-            if await handle_voice_message(client, message.chat.id, bot_response):
-                return
-
-            return await message.reply_text(bot_response)
-        except Exception as e:
-            if "429" in str(e) or "invalid" in str(e).lower():
-                retries -= 1
-                if retries % 2 == 0:
-                    current_key_index = (current_key_index + 1) % len(gemini_keys)
-                    db.set(collection, "current_key_index", current_key_index)
-                await asyncio.sleep(4)
-            else:
-                raise e
-
 @Client.on_message(filters.sticker & filters.private & ~filters.me & ~filters.bot)
 async def handle_sticker(client: Client, message: Message):
     try:
@@ -161,7 +125,40 @@ async def gchat(client: Client, message: Message):
         bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
         chat_history = get_chat_history(user_id, bot_role, user_message, user_name)
 
-        await process_message(client, message, chat_history, user_id, bot_role)
+        await asyncio.sleep(random.choice([4, 8, 10]))
+        await send_typing_action(client, message.chat.id, user_message)
+
+        gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
+        current_key_index = db.get(collection, "current_key_index") or 0
+        retries = len(gemini_keys) * 2
+
+        while retries > 0:
+            try:
+                current_key = gemini_keys[current_key_index]
+                genai.configure(api_key=current_key)
+                model = genai.GenerativeModel("gemini-2.0-flash-exp")
+                model.safety_settings = safety_settings
+
+                chat_context = "\n".join(chat_history)
+                response = model.start_chat().send_message(chat_context)
+                bot_response = response.text.strip()
+
+                chat_history.append(bot_response)
+                db.set(collection, f"chat_history.{user_id}", chat_history)
+
+                if await handle_voice_message(client, message.chat.id, bot_response):
+                    return
+
+                return await message.reply_text(bot_response)
+            except Exception as e:
+                if "429" in str(e) or "invalid" in str(e).lower():
+                    retries -= 1
+                    if retries % 2 == 0:
+                        current_key_index = (current_key_index + 1) % len(gemini_keys)
+                        db.set(collection, "current_key_index", current_key_index)
+                    await asyncio.sleep(4)
+                else:
+                    raise e
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
 
