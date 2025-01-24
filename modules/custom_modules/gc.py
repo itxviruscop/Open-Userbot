@@ -203,7 +203,7 @@ async def handle_files(client: Client, message: Message):
                     )
                     input_data = [prompt] + sample_images
                     response = await generate_gemini_response(input_data, chat_history, user_id)
-                    await message.reply_text(response)
+                    await message.reply_text(response, reply_to_message_id=message.message_id)
 
                 client.image_timers[user_id] = asyncio.create_task(process_images())
             return
@@ -226,8 +226,7 @@ async def handle_files(client: Client, message: Message):
             )
             input_data = [prompt, uploaded_file]
             response = await generate_gemini_response(input_data, chat_history, user_id)
-            return await message.reply_text(response)
-            return
+            return await message.reply_text(response, reply_to_message_id=message.message_id)
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `handle_files` function:\n\n{str(e)}")
     finally:
