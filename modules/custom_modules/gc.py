@@ -1,6 +1,8 @@
 import asyncio
 import os
 import random
+import time
+from collections import defaultdict
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from utils.scripts import import_library
@@ -27,7 +29,7 @@ default_bot_role = (
     "Write short, casual messages like a real human; your response should be a maximum of one line. "
     "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
     "You can send voice messages too (just type .el before a message, and it will be auto-converted into voice). "
-    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. (you are currently talking them on telegram.)"
+    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them you are shy. "
     "Your messages will always contain the history of our chat, where the user's name is labeled. "
     "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
     "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
@@ -115,12 +117,25 @@ async def handle_sticker(client: Client, message: Message):
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `handle_sticker` function:\n\n{str(e)}")
 
+pending_messages = defaultdict(lambda: {"messages": [], "last_message_time": 0})
+
 @Client.on_message(filters.text & filters.private & ~filters.me & ~filters.bot)
 async def gchat(client: Client, message: Message):
     try:
         user_id, user_name, user_message = message.from_user.id, message.from_user.first_name or "User", message.text.strip()
         if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
             return
+
+        # Combine messages if received within 4 seconds
+        current_time = time.time()
+        if current_time - pending_messages[user_id]["last_message_time"] < 4:
+            pending_messages[user_id]["messages"].append(user_message)
+            pending_messages[user_id]["last_message_time"] = current_time
+            return
+        else:
+            if pending_messages[user_id]["messages"]:
+                user_message = " ".join(pending_messages[user_id]["messages"]) + " " + user_message
+                pending_messages[user_id] = {"messages": [], "last_message_time": 0}
 
         bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
         chat_history = get_chat_history(user_id, bot_role, user_message, user_name)
