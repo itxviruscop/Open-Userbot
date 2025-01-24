@@ -27,7 +27,7 @@ default_bot_role = (
     "Write short, casual messages like a real human; your response should be a maximum of one line. "
     "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
     "You can send voice messages too (just type .el before a message, and it will be auto-converted into voice). "
-    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them you are shy. "
+    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. (you are currently talking them on telegram.)"
     "Your messages will always contain the history of our chat, where the user's name is labeled. "
     "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
     "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
@@ -175,6 +175,7 @@ async def handle_files(client: Client, message: Message):
         chat_context = "\n".join(chat_history)
 
         if message.photo:
+            # Initialize buffers if not already present
             if not hasattr(client, "image_buffer"):
                 client.image_buffer = {}
                 client.image_timers = {}
@@ -183,31 +184,37 @@ async def handle_files(client: Client, message: Message):
                 client.image_buffer[user_id] = []
                 client.image_timers[user_id] = None
 
+            # Download the image and add it to the buffer
             image_path = await client.download_media(message.photo)
             client.image_buffer[user_id].append(image_path)
 
+            # Set a timer to process images after 5 seconds
             if client.image_timers[user_id] is None:
                 async def process_images():
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(5)  # Wait for additional images
                     image_paths = client.image_buffer.pop(user_id, [])
                     client.image_timers[user_id] = None
 
                     if not image_paths:
                         return
 
+                    # Open and process images collectively
                     sample_images = [Image.open(img_path) for img_path in image_paths]
                     prompt = (
                         f"{chat_context}\n\nUser has sent multiple images."
-                        f"{' Caption: ' + caption if caption else ''} Generate a response based on the content of the images, and our chat context. "
-                        "Always follow the bot role, and talk like a human."
+                        f"{' Caption: ' + caption if caption else ''} Generate a response based on the content of the images and our chat context. "
+                        "Always follow the bot role and talk like a human."
                     )
                     input_data = [prompt] + sample_images
                     response = await generate_gemini_response(input_data, chat_history, user_id)
-                    await message.reply_text(response, reply_to_message_id=message.message_id)
+                    
+                    # Reply to the last image in the batch
+                    await message.reply(response, reply_to_message_id=message.id)
 
                 client.image_timers[user_id] = asyncio.create_task(process_images())
             return
 
+        # Handle other file types if necessary (retain existing functionality)
         file_type, file_path = None, None
         if message.video or message.video_note:
             file_type, file_path = "video", await client.download_media(message.video or message.video_note)
@@ -222,16 +229,18 @@ async def handle_files(client: Client, message: Message):
             uploaded_file = await upload_file_to_gemini(file_path, file_type)
             prompt = (
                 f"{chat_context}\n\nUser has sent a {file_type}."
-                f"{' Caption: ' + caption if caption else ''} Generate a response based on the content of the {file_type}, and our chat context, always follow role."
+                f"{' Caption: ' + caption if caption else ''} Generate a response based on the content of the {file_type} and our chat context."
             )
             input_data = [prompt, uploaded_file]
             response = await generate_gemini_response(input_data, chat_history, user_id)
-            return await message.reply_text(response, reply_to_message_id=message.message_id)
+            return await message.reply(response, reply_to_message_id=message.id)
+
     except Exception as e:
-        return await client.send_message("me", f"An error occurred in the `handle_files` function:\n\n{str(e)}")
+        await client.send_message("me", f"An error occurred in the `handle_files` function:\n\n{str(e)}")
     finally:
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
+
 
 @Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
