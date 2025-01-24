@@ -126,57 +126,35 @@ async def gchat(client: Client, message: Message):
         if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
             return
 
-        # Combine messages if received within 4 seconds
         current_time = time.time()
-        if current_time - pending_messages[user_id]["last_message_time"] < 4:
-            pending_messages[user_id]["messages"].append(user_message)
-            pending_messages[user_id]["last_message_time"] = current_time
-            return
-        else:
-            if pending_messages[user_id]["messages"]:
-                user_message = " ".join(pending_messages[user_id]["messages"]) + " " + user_message
-                pending_messages[user_id] = {"messages": [], "last_message_time": 0}
+        pending = pending_messages[user_id]
+
+        # Append current message to the list
+        pending["messages"].append(user_message)
+        pending["last_message_time"] = current_time
+
+        # Delay processing for 4 seconds to batch messages
+        await asyncio.sleep(4)
+
+        # Check if new messages were added during the delay
+        if pending_messages[user_id]["last_message_time"] > current_time:
+            return  # Skip if new messages were added during the delay
+
+        # Combine all pending messages
+        combined_message = " ".join(pending["messages"])
+        pending["messages"] = []  # Clear the pending messages after processing
 
         bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
-        chat_history = get_chat_history(user_id, bot_role, user_message, user_name)
+        chat_history = get_chat_history(user_id, bot_role, combined_message, user_name)
 
         await asyncio.sleep(random.choice([4, 8, 10]))
-        await send_typing_action(client, message.chat.id, user_message)
+        await send_typing_action(client, message.chat.id, combined_message)
 
-        gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
-        current_key_index = db.get(collection, "current_key_index") or 0
-        retries = len(gemini_keys) * 2
-
-        while retries > 0:
-            try:
-                current_key = gemini_keys[current_key_index]
-                genai.configure(api_key=current_key)
-                model = genai.GenerativeModel("gemini-2.0-flash-exp")
-                model.safety_settings = safety_settings
-
-                chat_context = "\n".join(chat_history)
-                response = model.start_chat().send_message(chat_context)
-                bot_response = response.text.strip()
-
-                chat_history.append(bot_response)
-                db.set(collection, f"chat_history.{user_id}", chat_history)
-
-                if await handle_voice_message(client, message.chat.id, bot_response):
-                    return
-
-                return await message.reply_text(bot_response)
-            except Exception as e:
-                if "429" in str(e) or "invalid" in str(e).lower():
-                    retries -= 1
-                    if retries % 2 == 0:
-                        current_key_index = (current_key_index + 1) % len(gemini_keys)
-                        db.set(collection, "current_key_index", current_key_index)
-                    await asyncio.sleep(4)
-                else:
-                    raise e
+        response = await generate_gemini_response(combined_message, chat_history, user_id)
+        await message.reply_text(response)
     except Exception as e:
-        return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
-
+        await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
+        
 @Client.on_message(filters.private & ~filters.me & ~filters.bot)
 async def handle_files(client: Client, message: Message):
     try:
