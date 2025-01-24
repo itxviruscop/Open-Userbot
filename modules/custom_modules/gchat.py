@@ -35,7 +35,7 @@ default_bot_role = (
     "Write short, casual messages like a real human; your response should be a maximum of one line. "
     "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
     "You can send voice messages too (just type .el before a message, and it will be auto-converted into voice). "
-    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell. "
+    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. (you are currently talking them on telegram.)"
     "Your messages will always contain the history of our chat, where the user's name is labeled. "
     "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
     "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
@@ -56,6 +56,46 @@ def get_chat_history(user_id, bot_role, user_message, user_name):
     chat_history.append(f"{user_name}: {user_message}")
     db.set(collection, f"chat_history.{user_id}", chat_history)
     return chat_history
+    
+async def generate_gemini_response(input_data, chat_history, user_id):
+    """Generates a response from Gemini AI based on input data."""
+    retries = 3
+    gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
+    current_key_index = db.get(collection, "current_key_index") or 0
+
+    while retries > 0:
+        try:
+            current_key = gemini_keys[current_key_index]
+            genai.configure(api_key=current_key)
+            global model
+            model = genai.GenerativeModel("gemini-2.0-flash-exp")
+            model.safety_settings = safety_settings
+
+            # Generate response
+            response = model.generate_content(input_data)
+            bot_response = response.text.strip()
+
+            chat_history.append(bot_response)
+            db.set(collection, f"chat_history.{user_id}", chat_history)
+            return bot_response
+        except Exception as e:
+            if "429" in str(e) or "invalid" in str(e).lower():
+                retries -= 1
+                current_key_index = (current_key_index + 1) % len(gemini_keys)
+                db.set(collection, "current_key_index", current_key_index)
+                await asyncio.sleep(4)
+            else:
+                raise e
+
+async def upload_file_to_gemini(file_path, file_type):
+    """Uploads a file to Gemini for processing."""
+    uploaded_file = genai.upload_file(file_path)
+    while uploaded_file.state.name == "PROCESSING":
+        await asyncio.sleep(10)
+        uploaded_file = genai.get_file(uploaded_file.name)
+    if uploaded_file.state.name == "FAILED":
+        raise ValueError(f"{file_type.capitalize()} failed to process.")
+    return uploaded_file
 
 async def send_typing_action(client, chat_id, user_message):
     await client.send_chat_action(chat_id=chat_id, action=enums.ChatAction.TYPING)
@@ -140,9 +180,9 @@ async def gchat(client: Client, message: Message):
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
 
-@Client.on_message(filters.photo & filters.private & ~filters.me & ~filters.bot)
-async def handle_images(client: Client, message: Message):
-    """Handles incoming images and generates a single response for multiple images using Gemini AI."""
+@Client.on_message(filters.private & ~filters.me & ~filters.bot)
+async def handle_files(client: Client, message: Message):
+    """Handles incoming files (images, videos, audio, documents) and generates a response using Gemini AI."""
     try:
         user_id, user_name = message.from_user.id, message.from_user.first_name or "User"
 
@@ -151,71 +191,91 @@ async def handle_images(client: Client, message: Message):
             return
 
         bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
-        chat_history = get_chat_history(user_id, bot_role, "", user_name)
+        caption = message.caption.strip() if message.caption else ""
+        chat_history = get_chat_history(user_id, bot_role, caption, user_name)
+        chat_context = "\n".join(chat_history)
 
-        # Temporarily store images to process together
-        if not hasattr(client, "image_buffer"):
-            client.image_buffer = {}
-        if user_id not in client.image_buffer:
-            client.image_buffer[user_id] = []
+        # Handle image buffering for batch processing
+        if message.photo:
+            # Initialize image buffer if not present
+            if not hasattr(client, "image_buffer"):
+                client.image_buffer = {}
+                client.image_timers = {}
 
-        # Download the current image
-        image_path = await client.download_media(message.photo)
-        client.image_buffer[user_id].append(image_path)
+            if user_id not in client.image_buffer:
+                client.image_buffer[user_id] = []
+                client.image_timers[user_id] = None
 
-        # Wait for 5 seconds to collect all images sent in the frame
-        if len(client.image_buffer[user_id]) == 1:
-            await asyncio.sleep(5)
+            # Add image to buffer
+            image_path = await client.download_media(message.photo)
+            client.image_buffer[user_id].append(image_path)
 
-            # Process all collected images
-            image_paths = client.image_buffer.pop(user_id, [])
-            if not image_paths:
-                return await message.reply_text("No images to process.")
+            # Start a timer for processing if it's the first image in the batch
+            if client.image_timers[user_id] is None:
+                async def process_images():
+                    await asyncio.sleep(5)  # Wait for 5 seconds
+                    image_paths = client.image_buffer.pop(user_id, [])
+                    client.image_timers[user_id] = None  # Reset the timer
 
-            # Open all images using PIL
-            sample_images = [Image.open(image_path) for image_path in image_paths]
-
-            gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
-            current_key_index = db.get(collection, "current_key_index") or 0
-            retries = len(gemini_keys) * 2
-
-            while retries > 0:
-                try:
-                    current_key = gemini_keys[current_key_index]
-                    genai.configure(api_key=current_key)
-                    global model
-                    model = genai.GenerativeModel("gemini-2.0-flash-exp")
-                    model.safety_settings = safety_settings
-
-                    chat_context = "\n".join(chat_history)
-                    prompt = (
-                        f"{chat_context}\n\nUser has sent multiple images. Generate a response based on the content "
-                        "of the images. Follow the bot role, and talk like a human. Do not explain what the pictures are about; "
-                        "instead, ask thoughtful or conversational questions related to them."
-                    )
-                    response = model.generate_content([prompt] + sample_images)
-                    bot_response = response.text.strip()
-
-                    chat_history.append(bot_response)
-                    db.set(collection, f"chat_history.{user_id}", chat_history)
-
-                    if await handle_voice_message(client, message.chat.id, bot_response):
+                    if not image_paths:
                         return
 
-                    return await message.reply_text(bot_response)
-                except Exception as e:
-                    if "429" in str(e) or "invalid" in str(e).lower():
-                        retries -= 1
-                        if retries % 2 == 0:
-                            current_key_index = (current_key_index + 1) % len(gemini_keys)
-                            db.set(collection, "current_key_index", current_key_index)
-                        await asyncio.sleep(4)  # Add a 4-second delay before retrying
-                    else:
-                        raise e
-    except Exception as e:
-        return await client.send_message("me", f"An error occurred in the `handle_images` function:\n\n{str(e)}")
+                    # Open all images using PIL
+                    sample_images = [Image.open(img_path) for img_path in image_paths]
+                    prompt = (
+                        f"{chat_context}\n\nUser has sent multiple images."
+                        f"{' Caption: ' + caption if caption else ''} Generate a response based on the content of the images, and our chat context"
+                        "Always follow the bot role, and talk like a human."
+                    )
+                    input_data = [prompt] + sample_images
 
-        
+                    # Generate response with Gemini
+                    response = await generate_gemini_response(input_data, chat_history, user_id)
+                    await message.reply_text(response)
+
+                # Start the timer for processing images
+                client.image_timers[user_id] = asyncio.create_task(process_images())
+
+            return  # Do not process the message further for images
+
+        # Process other file types individually
+        file_type = None
+        file_path = None
+        if message.video or message.video_note:
+            file_type = "video"
+            file_path = await client.download_media(message.video or message.video_note)
+        elif message.audio or message.voice:
+            file_type = "audio"
+            file_path = await client.download_media(message.audio or message.voice)
+        elif message.document and message.document.file_name.endswith(".pdf"):
+            file_type = "pdf"
+            file_path = await client.download_media(message.document)
+        elif message.document:
+            file_type = "document"
+            file_path = await client.download_media(message.document)
+
+        if file_path and file_type:
+            uploaded_file = await upload_file_to_gemini(file_path, file_type)
+            prompt = (
+                f"{chat_context}\n\nUser has sent a {file_type}."
+                f"{' Caption: ' + caption if caption else ''} Generate a response based on the content of the {file_type}, and our chat context."
+                f"of the {file_type} and the caption provided. Always follow the bot role, and talk like a human."
+            )
+            input_data = [prompt, uploaded_file]
+
+            # Generate response with Gemini
+            response = await generate_gemini_response(input_data, chat_history, user_id)
+            return await message.reply_text(response)
+
+        if not file_type:
+            return await message.reply_text("Unsupported file type.")
+    except Exception as e:
+        return await client.send_message("me", f"An error occurred in the `handle_files` function:\n\n{str(e)}")
+    finally:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+            
+
 @Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
     """Manages gchat commands."""
@@ -334,4 +394,4 @@ modules_help["gchat"] = {
     "setgkey set <index>": "Set the current Gemini API key by index.",
     "setgkey del <index>": "Delete a Gemini API key by index.",
     "setgkey": "Display all available Gemini API keys and the current key."
-            }
+}
