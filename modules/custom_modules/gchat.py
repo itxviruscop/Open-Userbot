@@ -119,80 +119,51 @@ async def handle_sticker(client: Client, message: Message):
 async def gchat(client: Client, message: Message):
     try:
         user_id, user_name, user_message = message.from_user.id, message.from_user.first_name or "User", message.text.strip()
-        
         if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
             return
 
-        if not hasattr(client, "message_buffer"):
-            client.message_buffer = {}
-            client.message_timers = {}
+        bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
+        chat_history = get_chat_history(user_id, bot_role, user_message, user_name)
 
-        if user_id not in client.message_buffer:
-            client.message_buffer[user_id] = []
-            client.message_timers[user_id] = None
+        await asyncio.sleep(random.choice([4, 8, 10]))
+        await send_typing_action(client, message.chat.id, user_message)
 
-        client.message_buffer[user_id].append(user_message)
+        gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
+        current_key_index = db.get(collection, "current_key_index") or 0
+        retries = len(gemini_keys) * 2
 
-        if client.message_timers[user_id]:
-            client.message_timers[user_id].cancel()
+        while retries > 0:
+            try:
+                current_key = gemini_keys[current_key_index]
+                genai.configure(api_key=current_key)
+                model = genai.GenerativeModel("gemini-2.0-flash-exp")
+                model.safety_settings = safety_settings
 
-        async def process_combined_messages():
-            await asyncio.sleep(8)
-            buffered_messages = client.message_buffer.pop(user_id, [])
-            client.message_timers[user_id] = None
+                chat_context = "\n".join(chat_history)
+                response = model.start_chat().send_message(chat_context)
+                bot_response = response.text.strip()
 
-            if not buffered_messages:
-                return
+                chat_history.append(bot_response)
+                db.set(collection, f"chat_history.{user_id}", chat_history)
 
-            combined_message = " ".join(buffered_messages)
+                if await handle_voice_message(client, message.chat.id, bot_response):
+                    return
 
-            bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
-            chat_history = get_chat_history(user_id, bot_role, combined_message, user_name)
-
-            await asyncio.sleep(random.choice([3, 5, 7]))
-
-            await send_typing_action(client, message.chat.id, combined_message)
-
-            gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
-            current_key_index = db.get(collection, "current_key_index") or 0
-            retries = len(gemini_keys) * 2
-
-            while retries > 0:
-                try:
-                    current_key = gemini_keys[current_key_index]
-                    genai.configure(api_key=current_key)
-                    model = genai.GenerativeModel("gemini-2.0-flash-exp")
-                    model.safety_settings = safety_settings
-
-                    chat_context = "\n".join(chat_history)
-                    response = model.start_chat().send_message(chat_context)
-                    bot_response = response.text.strip()
-
-                    chat_history.append(bot_response)
-                    db.set(collection, f"chat_history.{user_id}", chat_history)
-
-                    if await handle_voice_message(client, message.chat.id, bot_response):
-                        return
-
-                    return await message.reply_text(bot_response)
-                except Exception as e:
-                    if "429" in str(e) or "invalid" in str(e).lower():
-                        retries -= 1
-                        if retries % 2 == 0:
-                            current_key_index = (current_key_index + 1) % len(gemini_keys)
-                            db.set(collection, "current_key_index", current_key_index)
-                        await asyncio.sleep(4)
-                    else:
-                        raise e
-
-        client.message_timers[user_id] = asyncio.create_task(process_combined_messages())
-
+                return await message.reply_text(bot_response)
+            except Exception as e:
+                if "429" in str(e) or "invalid" in str(e).lower():
+                    retries -= 1
+                    if retries % 2 == 0:
+                        current_key_index = (current_key_index + 1) % len(gemini_keys)
+                        db.set(collection, "current_key_index", current_key_index)
+                    await asyncio.sleep(4)
+                else:
+                    raise e
     except Exception as e:
-        await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
+        return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
 
 @Client.on_message(filters.private & ~filters.me & ~filters.bot)
 async def handle_files(client: Client, message: Message):
-    file_path, file_type = None, None  # Initialize file_path and file_type to None
     try:
         user_id, user_name = message.from_user.id, message.from_user.first_name or "User"
         if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
@@ -238,6 +209,7 @@ async def handle_files(client: Client, message: Message):
                 client.image_timers[user_id] = asyncio.create_task(process_images())
             return
 
+        file_type, file_path = None, None
         if message.video or message.video_note:
             file_type, file_path = "video", await client.download_media(message.video or message.video_note)
         elif message.audio or message.voice:
