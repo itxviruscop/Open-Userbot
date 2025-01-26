@@ -143,7 +143,7 @@ async def wchat(client: Client, message: Message):
                 if await handle_voice_message(client, message.chat.id, bot_response):
                     return
 
-                return await message.reply_text(bot_response)
+                return await client.send_message(message.chat.id, bot_response)
             except Exception as e:
                 if "429" in str(e) or "invalid" in str(e).lower():
                     retries -= 1
