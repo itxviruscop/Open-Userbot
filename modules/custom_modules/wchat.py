@@ -28,7 +28,7 @@ collection = "custom.wchat"
 # Database initialization
 enabled_topics = db.get(collection, "enabled_topics") or []
 disabled_topics = db.get(collection, "disabled_topics") or []
-wchat_for_all = db.get(collection, "wchat_for_all") or False
+wchat_for_all_groups = db.get(collection, "wchat_for_all_groups") or {}
 
 # List of random smileys
 smileys = ["-.-", "):", ":)", "*.*", ")*"]
@@ -96,8 +96,9 @@ async def handle_voice_message(client, chat_id, bot_response):
 @Client.on_message(filters.sticker & filters.group & ~filters.me)
 async def handle_sticker(client: Client, message: Message):
     try:
-        topic_id = f"{message.chat.id}:{message.message_thread_id}"
-        if topic_id in disabled_topics or (not wchat_for_all and topic_id not in enabled_topics):
+        group_id = str(message.chat.id)  # Convert group_id to string
+        topic_id = f"{group_id}:{message.message_thread_id}"
+        if topic_id in disabled_topics or (not wchat_for_all_groups.get(group_id, False) and topic_id not in enabled_topics):
             return
         random_smiley = random.choice(smileys)
         await asyncio.sleep(random.uniform(5, 10))
@@ -108,9 +109,10 @@ async def handle_sticker(client: Client, message: Message):
 @Client.on_message(filters.text & filters.group & ~filters.me)
 async def wchat(client: Client, message: Message):
     try:
-        topic_id = f"{message.chat.id}:{message.message_thread_id}"
+        group_id = str(message.chat.id)  # Convert group_id to string
+        topic_id = f"{group_id}:{message.message_thread_id}"
         user_name, user_message = message.from_user.first_name or "User", message.text.strip()
-        if topic_id in disabled_topics or (not wchat_for_all and topic_id not in enabled_topics):
+        if topic_id in disabled_topics or (not wchat_for_all_groups.get(group_id, False) and topic_id not in enabled_topics):
             return
 
         bot_role = db.get(collection, f"custom_roles.{topic_id}") or default_bot_role
@@ -156,9 +158,10 @@ async def wchat(client: Client, message: Message):
 @Client.on_message(filters.group & ~filters.me)
 async def handle_files(client: Client, message: Message):
     try:
-        topic_id = f"{message.chat.id}:{message.message_thread_id}"
+        group_id = str(message.chat.id)  # Convert group_id to string
+        topic_id = f"{group_id}:{message.message_thread_id}"
         user_name = message.from_user.first_name or "User"
-        if topic_id in disabled_topics or (not wchat_for_all and topic_id not in enabled_topics):
+        if topic_id in disabled_topics or (not wchat_for_all_groups.get(group_id, False) and topic_id not in enabled_topics):
             return
 
         bot_role = db.get(collection, f"custom_roles.{topic_id}") or default_bot_role
@@ -230,7 +233,8 @@ async def wchat_command(client: Client, message: Message):
     try:
         parts = message.text.strip().split()
         command = parts[1].lower()
-        topic_id = f"{message.chat.id}:{message.message_thread_id}"
+        group_id = str(message.chat.id)  # Convert group_id to string
+        topic_id = f"{group_id}:{message.message_thread_id}"
 
         if command == "on":
             if topic_id in disabled_topics:
@@ -252,10 +256,9 @@ async def wchat_command(client: Client, message: Message):
             db.set(collection, f"chat_history.{topic_id}", None)
             await message.edit_text(f"<b>Chat history deleted for topic {topic_id}.</b>")
         elif command == "all":
-            global wchat_for_all
-            wchat_for_all = not wchat_for_all
-            db.set(collection, "wchat_for_all", wchat_for_all)
-            await message.edit_text(f"wchat is now {'enabled' if wchat_for_all else 'disabled'} for all topics.")
+            wchat_for_all_groups[group_id] = not wchat_for_all_groups.get(group_id, False)
+            db.set(collection, "wchat_for_all_groups", wchat_for_all_groups)
+            await message.edit_text(f"wchat is now {'enabled' if wchat_for_all_groups[group_id] else 'disabled'} for all topics in this group.")
         else:
             await message.edit_text(f"<b>Usage:</b> {prefix}wchat `on`, `off`, `del`, or `all`.")
         await asyncio.sleep(1)
@@ -332,7 +335,7 @@ modules_help["wchat"] = {
     "wchat on": "Enable wchat for the current topic.",
     "wchat off": "Disable wchat for the current topic.",
     "wchat del": "Delete the chat history for the current topic.",
-    "wchat all": "Toggle wchat for all topics globally.",
+    "wchat all": "Toggle wchat for all topics in the current group.",
     "role <custom role>": "Set a custom role for the bot for the current topic and clear existing chat history.",
     "setgkey add <key>": "Add a new Gemini API key.",
     "setgkey set <index>": "Set the current Gemini API key by index.",
