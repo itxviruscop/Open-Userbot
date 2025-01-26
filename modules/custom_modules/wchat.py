@@ -29,6 +29,7 @@ collection = "custom.wchat"
 enabled_topics = db.get(collection, "enabled_topics") or []
 disabled_topics = db.get(collection, "disabled_topics") or []
 wchat_for_all_groups = db.get(collection, "wchat_for_all_groups") or {}
+group_roles = db.get(collection, "group_roles") or {}
 
 # List of random smileys
 smileys = ["-.-", "):", ":)", "*.*", ")*"]
@@ -115,7 +116,7 @@ async def wchat(client: Client, message: Message):
         if topic_id in disabled_topics or (not wchat_for_all_groups.get(group_id, False) and topic_id not in enabled_topics):
             return
 
-        bot_role = db.get(collection, f"custom_roles.{topic_id}") or default_bot_role
+        bot_role = db.get(collection, f"custom_roles.{topic_id}") or group_roles.get(group_id) or default_bot_role
         chat_history = get_chat_history(topic_id, bot_role, user_message, user_name)
 
         await asyncio.sleep(random.choice([4, 8, 10]))
@@ -164,10 +165,12 @@ async def handle_files(client: Client, message: Message):
         if topic_id in disabled_topics or (not wchat_for_all_groups.get(group_id, False) and topic_id not in enabled_topics):
             return
 
-        bot_role = db.get(collection, f"custom_roles.{topic_id}") or default_bot_role
+        bot_role = db.get(collection, f"custom_roles.{topic_id}") or group_roles.get(group_id) or default_bot_role
         caption = message.caption.strip() if message.caption else ""
         chat_history = get_chat_history(topic_id, bot_role, caption, user_name)
         chat_context = "\n".join(chat_history)
+
+        file_type, file_path = None, None  # Initialize file_path to None
 
         if message.photo:
             if not hasattr(client, "image_buffer"):
@@ -203,7 +206,6 @@ async def handle_files(client: Client, message: Message):
                 client.image_timers[topic_id] = asyncio.create_task(process_images())
             return
 
-        file_type, file_path = None, None
         if message.video or message.video_note:
             file_type, file_path = "video", await client.download_media(message.video or message.video_note)
         elif message.audio or message.voice:
@@ -270,18 +272,41 @@ async def wchat_command(client: Client, message: Message):
 async def set_custom_role(client: Client, message: Message):
     try:
         parts = message.text.strip().split()
+        if len(parts) < 2:
+            await message.edit_text(f"Usage: {prefix}role [group|topic] <custom role>")
+            return
+        
+        scope = parts[1].lower()
         custom_role = " ".join(parts[2:]).strip()
-        topic_id = f"{message.chat.id}:{message.message_thread_id}"
+        group_id = str(message.chat.id)  # Convert group_id to string
+        topic_id = f"{group_id}:{message.message_thread_id}"
 
-        if not custom_role:
-            db.set(collection, f"custom_roles.{topic_id}", default_bot_role)
-            db.set(collection, f"chat_history.{topic_id}", None)
-            await message.edit_text(f"Role reset to default for topic {topic_id}.")
+        if scope == "group":
+            if not custom_role:
+                # Reset role to default for the group
+                group_roles.pop(group_id, None)
+                db.set(collection, "group_roles", group_roles)
+                await message.edit_text(f"Role reset to default for group {group_id}.")
+            else:
+                # Set custom role for the group
+                group_roles[group_id] = custom_role
+                db.set(collection, "group_roles", group_roles)
+                await message.edit_text(f"Role set successfully for group {group_id}!\n<b>New Role:</b> {custom_role}")
+        elif scope == "topic":
+            if not custom_role:
+                # Reset role to group's custom role or default role if no group role exists
+                group_role = group_roles.get(group_id, default_bot_role)
+                db.set(collection, f"custom_roles.{topic_id}", group_role)
+                db.set(collection, f"chat_history.{topic_id}", None)
+                await message.edit_text(f"Role reset to group's role for topic {topic_id}.")
+            else:
+                # Set custom role for the topic
+                db.set(collection, f"custom_roles.{topic_id}", custom_role)
+                db.set(collection, f"chat_history.{topic_id}", None)
+                await message.edit_text(f"Role set successfully for topic {topic_id}!\n<b>New Role:</b> {custom_role}")
         else:
-            db.set(collection, f"custom_roles.{topic_id}", custom_role)
-            db.set(collection, f"chat_history.{topic_id}", None)
-            await message.edit_text(f"Role set successfully for topic {topic_id}!\n<b>New Role:</b> {custom_role}")
-
+            await message.edit_text(f"Invalid scope. Use 'group' or 'topic'.")
+        
         await asyncio.sleep(1)
         await message.delete()
     except Exception as e:
@@ -336,7 +361,9 @@ modules_help["wchat"] = {
     "wchat off": "Disable wchat for the current topic.",
     "wchat del": "Delete the chat history for the current topic.",
     "wchat all": "Toggle wchat for all topics in the current group.",
-    "role <custom role>": "Set a custom role for the bot for the current topic and clear existing chat history.",
+    "role group <custom role>": "Set a custom role for the bot for the current group.",
+    "role topic <custom role>": "Set a custom role for the bot for the current topic and clear existing chat history.",
+    "role reset": "Reset the custom role for the current group to default.",
     "setgkey add <key>": "Add a new Gemini API key.",
     "setgkey set <index>": "Set the current Gemini API key by index.",
     "setgkey del <index>": "Delete a Gemini API key by index.",
