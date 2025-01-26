@@ -312,7 +312,7 @@ async def set_custom_role(client: Client, message: Message):
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `role` command:\n\n{str(e)}")
 
-@Client.on_message(filters.command("setgkey", prefix) & filters.me)
+@Client.on_message(filters.command("setwkey", prefix) & filters.me)
 async def set_gemini_key(client: Client, message: Message):
     try:
         command = message.text.strip().split()
@@ -354,7 +354,7 @@ async def set_gemini_key(client: Client, message: Message):
 
         await asyncio.sleep(1)
     except Exception as e:
-        await client.send_message("me", f"An error occurred in the `setgkey` command:\n\n{str(e)}")
+        await client.send_message("me", f"An error occurred in the `setwkey` command:\n\n{str(e)}")
 
 modules_help["wchat"] = {
     "wchat on": "Enable wchat for the current topic.",
@@ -364,8 +364,8 @@ modules_help["wchat"] = {
     "role group <custom role>": "Set a custom role for the bot for the current group.",
     "role topic <custom role>": "Set a custom role for the bot for the current topic and clear existing chat history.",
     "role reset": "Reset the custom role for the current group to default.",
-    "setgkey add <key>": "Add a new Gemini API key.",
-    "setgkey set <index>": "Set the current Gemini API key by index.",
-    "setgkey del <index>": "Delete a Gemini API key by index.",
-    "setgkey": "Display all available Gemini API keys and the current key."
+    "setwkey add <key>": "Add a new Gemini API key.",
+    "setwkey set <index>": "Set the current Gemini API key by index.",
+    "setwkey del <index>": "Delete a Gemini API key by index.",
+    "setwkey": "Display all available Gemini API keys and the current key."
 }
