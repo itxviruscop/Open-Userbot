@@ -192,6 +192,7 @@ async def gchat(client: Client, message: Message):
 
 @Client.on_message(filters.private & ~filters.me & ~filters.bot)
 async def handle_files(client: Client, message: Message):
+    file_path, file_type = None, None
     try:
         user_id, user_name = message.from_user.id, message.from_user.first_name or "User"
         if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
@@ -237,7 +238,6 @@ async def handle_files(client: Client, message: Message):
                 client.image_timers[user_id] = asyncio.create_task(process_images())
             return
 
-        file_type, file_path = None, None
         if message.video or message.video_note:
             file_type, file_path = "video", await client.download_media(message.video or message.video_note)
         elif message.audio or message.voice:
