@@ -260,7 +260,7 @@ async def handle_files(client: Client, message: Message):
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `handle_files` function:\n\n{str(e)}")
     finally:
-        if file_path and os.path.exists(file_path):  # Check if file_path is not None before accessing it
+        if file_path and os.path.exists(file_path):
             os.remove(file_path)
 
 @Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
