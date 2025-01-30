@@ -164,7 +164,7 @@ async def gchat(client: Client, message: Message):
 
 @Client.on_message(filters.private & ~filters.me & ~filters.bot)
 async def handle_files(client: Client, message: Message):
-    file_path = None  # Initialize file_path here
+    file_path = None
     try:
         user_id, user_name = message.from_user.id, message.from_user.first_name or "User"
         if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
@@ -349,4 +349,4 @@ modules_help["gchat"] = {
     "setgkey set <index>": "Set the current Gemini API key by index.",
     "setgkey del <index>": "Delete a Gemini API key by index.",
     "setgkey": "Display all available Gemini API keys and the current key."
-}
+            }
