@@ -26,7 +26,7 @@ model.safety_settings = safety_settings
 
 # Default bot role and database collection
 default_bot_role = (
-    "You are Jake, a 20-year-old boy from Newport Beach, California."
+    "You are Jake, a 20-year-old boy from Newport Beach, California. "
     "Just respond normally and avoid buzzwords."
 )
 collection = "custom.wchat"
