@@ -17,6 +17,7 @@ safety_settings = [{"category": cat, "threshold": "BLOCK_NONE"} for cat in [
     "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_UNSPECIFIED"]]
 model = genai.GenerativeModel("gemini-2.0-flash-exp")
 model.safety_settings = safety_settings
+model.max_output_tokens = 1000  # Set the maximum output tokens here
 
 # Default bot role and database collection
 default_bot_role = (
@@ -50,6 +51,7 @@ async def generate_gemini_response(input_data, chat_history, user_id):
             genai.configure(api_key=current_key)
             model = genai.GenerativeModel("gemini-2.0-flash-exp")
             model.safety_settings = safety_settings
+            model.max_output_tokens = 1000  # Set the maximum output tokens here
 
             response = model.generate_content(input_data)
             bot_response = response.text.strip()
@@ -88,7 +90,7 @@ async def handle_voice_message(client, chat_id, bot_response):
                 os.remove(audio_path)
                 return True
         except Exception:
-            bot_response = bot_response[3:].strip()
+            bot_response = bot_response[3:].trip()
             await client.send_message(chat_id, bot_response)
             return True
     return False
@@ -128,6 +130,7 @@ async def gchat(client: Client, message: Message):
                 genai.configure(api_key=current_key)
                 model = genai.GenerativeModel("gemini-2.0-flash-exp")
                 model.safety_settings = safety_settings
+                model.max_output_tokens = 1000  # Set the maximum output tokens here
 
                 chat_context = "\n".join(chat_history)
                 response = model.start_chat().send_message(chat_context)
@@ -306,6 +309,7 @@ async def set_gemini_key(client: Client, message: Message):
                 genai.configure(api_key=gemini_keys[current_key_index])
                 model = genai.GenerativeModel("gemini-2.0-flash-exp")
                 model.safety_settings = safety_settings
+                model.max_output_tokens = 1000  # Set the maximum output tokens here
                 await message.edit_text(f"Current Gemini API key set to key {key}.")
             else:
                 await message.edit_text(f"Invalid key index: {key}.")
@@ -339,4 +343,4 @@ modules_help["gchat"] = {
     "setgkey set <index>": "Set the current Gemini API key by index.",
     "setgkey del <index>": "Delete a Gemini API key by index.",
     "setgkey": "Display all available Gemini API keys and the current key."
-    }
+}
