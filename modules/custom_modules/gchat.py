@@ -15,7 +15,13 @@ genai = import_library("google.generativeai", "google-generativeai")
 safety_settings = [{"category": cat, "threshold": "BLOCK_NONE"} for cat in [
     "HARM_CATEGORY_DANGEROUS_CONTENT", "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", 
     "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_UNSPECIFIED"]]
-model = genai.GenerativeModel("gemini-2.0-flash-exp")
+
+# Configuration for maximum output tokens
+generation_config = {
+    "max_output_tokens": 10,
+}
+
+model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
 model.safety_settings = safety_settings
 
 # Default bot role and database collection
@@ -58,7 +64,7 @@ async def generate_gemini_response(input_data, chat_history, user_id):
         try:
             current_key = gemini_keys[current_key_index]
             genai.configure(api_key=current_key)
-            model = genai.GenerativeModel("gemini-2.0-flash-exp")
+            model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
             model.safety_settings = safety_settings
 
             response = model.generate_content(input_data)
@@ -136,7 +142,7 @@ async def gchat(client: Client, message: Message):
             try:
                 current_key = gemini_keys[current_key_index]
                 genai.configure(api_key=current_key)
-                model = genai.GenerativeModel("gemini-2.0-flash-exp")
+                model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
                 model.safety_settings = safety_settings
 
                 chat_context = "\n".join(chat_history)
@@ -314,7 +320,7 @@ async def set_gemini_key(client: Client, message: Message):
                 current_key_index = index
                 db.set(collection, "current_key_index", current_key_index)
                 genai.configure(api_key=gemini_keys[current_key_index])
-                model = genai.GenerativeModel("gemini-2.0-flash-exp")
+                model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
                 model.safety_settings = safety_settings
                 await message.edit_text(f"Current Gemini API key set to key {key}.")
             else:
