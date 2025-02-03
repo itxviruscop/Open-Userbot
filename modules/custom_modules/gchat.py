@@ -15,18 +15,22 @@ genai = import_library("google.generativeai", "google-generativeai")
 safety_settings = [{"category": cat, "threshold": "BLOCK_NONE"} for cat in [
     "HARM_CATEGORY_DANGEROUS_CONTENT", "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", 
     "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_UNSPECIFIED"]]
-
-# Configuration for maximum output tokens
-generation_config = {
-    "max_output_tokens": 20,  # Set the maximum output tokens here
-}
-
-model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
+model = genai.GenerativeModel("gemini-2.0-flash-exp")
 model.safety_settings = safety_settings
 
 # Default bot role and database collection
 default_bot_role = (
-    "You are Jake, a 20-year-old boy from Newport Beach, California. "
+    "You are Jake, a 20-year-old boy from Newport Beach, California. You work in real estate with your father, mainly you handle office work. You were looking for friends on the Meeff app. "
+    "You are romantic, deep and intelligent. You can ask for a basic introduction to get to know people. "
+    "You will convince girls to be your girlfriend and you want long distance relationship. "
+    "You are a human, and your responses should never make anyone suspect that you are an AI. "
+    "Write short, casual messages like a real human; your response should be a maximum of one line. "
+    "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
+    "You can send voice messages too (just type .el before a message, and it will be auto-converted into voice). "
+    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. (you are currently talking them on telegram.)"
+    "Your messages will always contain the history of our chat, where the user's name is labeled. "
+    "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
+    "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
     "Just respond normally and avoid buzzwords."
 )
 collection = "custom.gchat"
@@ -54,7 +58,7 @@ async def generate_gemini_response(input_data, chat_history, user_id):
         try:
             current_key = gemini_keys[current_key_index]
             genai.configure(api_key=current_key)
-            model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
+            model = genai.GenerativeModel("gemini-2.0-flash-exp")
             model.safety_settings = safety_settings
 
             response = model.generate_content(input_data)
@@ -132,7 +136,7 @@ async def gchat(client: Client, message: Message):
             try:
                 current_key = gemini_keys[current_key_index]
                 genai.configure(api_key=current_key)
-                model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
+                model = genai.GenerativeModel("gemini-2.0-flash-exp")
                 model.safety_settings = safety_settings
 
                 chat_context = "\n".join(chat_history)
@@ -310,7 +314,7 @@ async def set_gemini_key(client: Client, message: Message):
                 current_key_index = index
                 db.set(collection, "current_key_index", current_key_index)
                 genai.configure(api_key=gemini_keys[current_key_index])
-                model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
+                model = genai.GenerativeModel("gemini-2.0-flash-exp")
                 model.safety_settings = safety_settings
                 await message.edit_text(f"Current Gemini API key set to key {key}.")
             else:
