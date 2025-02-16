@@ -211,6 +211,9 @@ async def handle_files(client: Client, message: Message):
                     input_data = [prompt] + sample_images
                     response = await generate_gemini_response(input_data, chat_history, user_id)
                     
+                    if await handle_voice_message(client, message.chat.id, response):
+                        return
+
                     await message.reply(response, reply_to_message_id=message.id)
 
                 client.image_timers[user_id] = asyncio.create_task(process_images())
@@ -234,6 +237,10 @@ async def handle_files(client: Client, message: Message):
             )
             input_data = [prompt, uploaded_file]
             response = await generate_gemini_response(input_data, chat_history, user_id)
+
+            if await handle_voice_message(client, message.chat.id, response):
+                return
+
             return await message.reply(response, reply_to_message_id=message.id)
 
     except Exception as e:
