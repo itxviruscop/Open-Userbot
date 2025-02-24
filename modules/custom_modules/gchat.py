@@ -11,6 +11,9 @@ from modules.custom_modules.elevenlabs import generate_elevenlabs_audio
 from PIL import Image
 import datetime
 
+# Default timezone
+default_timezone = "America/Los_Angeles"
+
 # Initialize Gemini AI
 genai = import_library("google.generativeai", "google-generativeai")
 safety_settings = [{"category": cat, "threshold": "BLOCK_NONE"} for cat in [
@@ -42,18 +45,16 @@ smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
 def get_chat_history(user_id, bot_role, user_message, user_name):
     chat_history = db.get(collection, f"chat_history.{user_id}") or [f"Role: {bot_role}"]
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    chat_history.append(f"{timestamp} - {user_name}: {user_message}")
+    chat_history.append(f"{user_name}: {user_message}")
     db.set(collection, f"chat_history.{user_id}", chat_history)
     return chat_history
 
 def build_prompt(bot_role, chat_history, user_message):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    chat_context = "\n".join(chat_history)
     prompt = (
-        f"Time: {timestamp}\n"
+        f"Time: {timestamp} ({default_timezone})\n"
         f"Role: {bot_role}\n"
-        f"Chat History:\n{chat_context}\n"
+        f"Chat History:\n{'\n'.join(chat_history)}\n"
         f"User Message:\n{user_message}"
     )
     return prompt
@@ -107,7 +108,7 @@ async def handle_voice_message(client, chat_id, bot_response):
                 os.remove(audio_path)
                 return True
         except Exception:
-            bot_response = bot_response[3:].strip()
+            bot_response = bot_response[3:].trip()
             await client.send_message(chat_id, bot_response)
             return True
     return False
@@ -304,7 +305,7 @@ async def set_custom_role(client: Client, message: Message):
         await asyncio.sleep(1)
         await message.delete()
     except Exception as e:
-        await client.send_message("me", f"An error occurred in the `role` command:\n\n{str(e)}")
+        await client send_message("me", f"An error occurred in the `role` command:\n\n{str(e)}")
 
 @Client.on_message(filters.command("setgkey", prefix) & filters.me)
 async def set_gemini_key(client: Client, message: Message):
