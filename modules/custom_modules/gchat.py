@@ -9,6 +9,7 @@ from utils.db import db
 from utils.misc import modules_help, prefix
 from modules.custom_modules.elevenlabs import generate_elevenlabs_audio
 from PIL import Image
+import datetime
 
 # Initialize Gemini AI
 genai = import_library("google.generativeai", "google-generativeai")
@@ -41,9 +42,21 @@ smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
 def get_chat_history(user_id, bot_role, user_message, user_name):
     chat_history = db.get(collection, f"chat_history.{user_id}") or [f"Role: {bot_role}"]
-    chat_history.append(f"{user_name}: {user_message}")
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    chat_history.append(f"{timestamp} - {user_name}: {user_message}")
     db.set(collection, f"chat_history.{user_id}", chat_history)
     return chat_history
+
+def build_prompt(bot_role, chat_history, user_message):
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    chat_context = "\n".join(chat_history)
+    prompt = (
+        f"Time: {timestamp}\n"
+        f"Role: {bot_role}\n"
+        f"Chat History:\n{chat_context}\n"
+        f"User Message:\n{user_message}"
+    )
+    return prompt
 
 async def generate_gemini_response(input_data, chat_history, user_id):
     retries = 3
@@ -86,7 +99,7 @@ async def send_typing_action(client, chat_id, user_message):
     await asyncio.sleep(min(len(user_message) / 10, 5))
 
 async def handle_voice_message(client, chat_id, bot_response):
-    if bot_response.startswith(".el"):
+    if (bot_response.startswith(".el")):
         try:
             audio_path = await generate_elevenlabs_audio(text=bot_response[3:])
             if audio_path:
@@ -115,7 +128,7 @@ async def handle_sticker(client: Client, message: Message):
 async def gchat(client: Client, message: Message):
     try:
         user_id, user_name, user_message = message.from_user.id, message.from_user.first_name or "User", message.text.strip()
-        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
+        if (user_id in disabled_users) or (not gchat_for_all and user_id not in enabled_users):
             return
 
         bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
@@ -135,8 +148,8 @@ async def gchat(client: Client, message: Message):
                 model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
                 model.safety_settings = safety_settings
 
-                chat_context = "\n".join(chat_history)
-                response = model.start_chat().send_message(chat_context)
+                prompt = build_prompt(bot_role, chat_history, user_message)
+                response = model.start_chat().send_message(prompt)
                 bot_response = response.text.strip()
 
                 chat_history.append(bot_response)
@@ -149,7 +162,7 @@ async def gchat(client: Client, message: Message):
             except Exception as e:
                 if "429" in str(e) or "invalid" in str(e).lower():
                     retries -= 1
-                    if retries % 2 == 0:
+                    if (retries % 2) == 0:
                         current_key_index = (current_key_index + 1) % len(gemini_keys)
                         db.set(collection, "current_key_index", current_key_index)
                     await asyncio.sleep(4)
@@ -193,11 +206,8 @@ async def handle_files(client: Client, message: Message):
                         return
 
                     sample_images = [Image.open(img_path) for img_path in image_paths]
-                    prompt = (
-                        f"{chat_context}\n\nUser has sent multiple images."
-                        f"{' Caption: ' + caption if caption else ''} Generate a response based on the content of the images and our chat context. "
-                        "Always follow the bot role and talk like a human."
-                    )
+                    prompt_text = "User has sent multiple images." + (f" Caption: {caption}" if caption else "")
+                    prompt = build_prompt(bot_role, chat_history, prompt_text)
                     input_data = [prompt] + sample_images
                     response = await generate_gemini_response(input_data, chat_history, user_id)
                     
@@ -221,10 +231,8 @@ async def handle_files(client: Client, message: Message):
 
         if file_path and file_type:
             uploaded_file = await upload_file_to_gemini(file_path, file_type)
-            prompt = (
-                f"{chat_context}\n\nUser has sent a {file_type}."
-                f"{' Caption: ' + caption if caption else ''} Generate a response based on the content of the {file_type} and our chat context and always follow bot role. "
-            )
+            prompt_text = f"User has sent a {file_type}." + (f" Caption: {caption}" if caption else "")
+            prompt = build_prompt(bot_role, chat_history, prompt_text)
             input_data = [prompt, uploaded_file]
             response = await generate_gemini_response(input_data, chat_history, user_id)
 
