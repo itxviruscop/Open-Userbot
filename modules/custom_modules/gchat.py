@@ -11,9 +11,6 @@ from modules.custom_modules.elevenlabs import generate_elevenlabs_audio
 from PIL import Image
 import datetime
 
-# Default city
-DEFAULT_CITY = "Los Angeles"
-
 # Initialize Gemini AI
 genai = import_library("google.generativeai", "google-generativeai")
 safety_settings = [{"category": cat, "threshold": "BLOCK_NONE"} for cat in [
@@ -45,21 +42,21 @@ smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
 def get_chat_history(user_id, bot_role, user_message, user_name):
     chat_history = db.get(collection, f"chat_history.{user_id}") or [f"Role: {bot_role}"]
-    chat_history.append(f"{user_name}: {user_message}")
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    chat_history.append(f"{timestamp} - {user_name}: {user_message}")
     db.set(collection, f"chat_history.{user_id}", chat_history)
     return chat_history
 
 def build_prompt(bot_role, chat_history, user_message):
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     chat_context = "\n".join(chat_history)
     prompt = (
+        f"Time: {timestamp}\n"
         f"Role: {bot_role}\n"
         f"Chat History:\n{chat_context}\n"
         f"User Message:\n{user_message}"
     )
     return prompt
-
-def get_current_time():
-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 async def generate_gemini_response(input_data, chat_history, user_id):
     retries = 3
@@ -102,8 +99,18 @@ async def send_typing_action(client, chat_id, user_message):
     await asyncio.sleep(min(len(user_message) / 10, 5))
 
 async def handle_voice_message(client, chat_id, bot_response):
-    if (await handle_voice_message(client, message.chat.id, bot_response)):
-        return
+    if bot_response.startswith(".el"):
+        try:
+            audio_path = await generate_elevenlabs_audio(text=bot_response[3:])
+            if audio_path:
+                await client.send_voice(chat_id=chat_id, voice=audio_path)
+                os.remove(audio_path)
+                return True
+        except Exception:
+            bot_response = bot_response[3:].strip()
+            await client.send_message(chat_id, bot_response)
+            return True
+    return False
 
 @Client.on_message(filters.sticker & filters.private & ~filters.me & ~filters.bot)
 async def handle_sticker(client: Client, message: Message):
