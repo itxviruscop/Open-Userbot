@@ -99,7 +99,7 @@ async def send_typing_action(client, chat_id, user_message):
     await asyncio.sleep(min(len(user_message) / 10, 5))
 
 async def handle_voice_message(client, chat_id, bot_response):
-    if (bot_response.startswith(".el")):
+    if bot_response.startswith(".el"):
         try:
             audio_path = await generate_elevenlabs_audio(text=bot_response[3:])
             if audio_path:
@@ -128,7 +128,7 @@ async def handle_sticker(client: Client, message: Message):
 async def gchat(client: Client, message: Message):
     try:
         user_id, user_name, user_message = message.from_user.id, message.from_user.first_name or "User", message.text.strip()
-        if (user_id in disabled_users) or (not gchat_for_all and user_id not in enabled_users):
+        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
             return
 
         bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
@@ -162,7 +162,7 @@ async def gchat(client: Client, message: Message):
             except Exception as e:
                 if "429" in str(e) or "invalid" in str(e).lower():
                     retries -= 1
-                    if (retries % 2) == 0:
+                    if retries % 2 == 0:
                         current_key_index = (current_key_index + 1) % len(gemini_keys)
                         db.set(collection, "current_key_index", current_key_index)
                     await asyncio.sleep(4)
