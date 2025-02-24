@@ -10,6 +10,7 @@ from utils.misc import modules_help, prefix
 from modules.custom_modules.elevenlabs import generate_elevenlabs_audio
 from PIL import Image
 import datetime
+import pytz
 
 # Initialize Gemini AI
 genai = import_library("google.generativeai", "google-generativeai")
@@ -42,13 +43,13 @@ smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
 def get_chat_history(user_id, bot_role, user_message, user_name):
     chat_history = db.get(collection, f"chat_history.{user_id}") or [f"Role: {bot_role}"]
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.datetime.now(pytz.timezone('America/Los_Angeles')).strftime("%Y-%m-%d %H:%M:%S %Z")
     chat_history.append(f"{timestamp} - {user_name}: {user_message}")
     db.set(collection, f"chat_history.{user_id}", chat_history)
     return chat_history
 
 def build_prompt(bot_role, chat_history, user_message):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.datetime.now(pytz.timezone('America/Los_Angeles')).strftime("%Y-%m-%d %H:%M:%S %Z")
     chat_context = "\n".join(chat_history)
     prompt = (
         f"Time: {timestamp}\n"
