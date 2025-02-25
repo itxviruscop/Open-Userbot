@@ -20,7 +20,7 @@ safety_settings = [{"category": cat, "threshold": "BLOCK_NONE"} for cat in [
 
 # Configuration for maximum output tokens
 generation_config = {
-    "max_output_tokens": 40,  # Set the maximum output tokens here
+    "max_output_tokens": 40,
 }
 
 model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
