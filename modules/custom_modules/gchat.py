@@ -393,39 +393,39 @@ async def set_gemini_key(client: Client, message: Message):
         current_key_index = db.get(collection, "current_key_index") or 0
 
         if subcommand == "add" and key:
-        gemini_keys.append(key)
-        db.set(collection, "gemini_keys", gemini_keys)
-        await message.edit_text("New Gemini API key added successfully!")
-    elif subcommand == "set" and key:
-        index = int(key) - 1
-        if 0 <= index < len(gemini_keys):
-            current_key_index = index
-            db.set(collection, "current_key_index", current_key_index)
-            genai.configure(api_key=gemini_keys[current_key_index])
-            model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
-            model.safety_settings = safety_settings
-            await message.edit_text(f"Current Gemini API key set to key {key}.")
-        else:
-            await message.edit_text(f"Invalid key index: {key}.")
-    elif subcommand == "del" and key:
-        index = int(key) - 1
-        if 0 <= index < len(gemini_keys):
-            del gemini_keys[index]
+            gemini_keys.append(key)
             db.set(collection, "gemini_keys", gemini_keys)
-            if current_key_index >= len(gemini_keys):
-                current_key_index = max(0, len(gemini_keys) - 1)
+            await message.edit_text("New Gemini API key added successfully!")
+        elif subcommand == "set" and key:
+            index = int(key) - 1
+            if 0 <= index < len(gemini_keys):
+                current_key_index = index
                 db.set(collection, "current_key_index", current_key_index)
-            await message.edit_text(f"Gemini API key {key} deleted successfully!")
+                genai.configure(api_key=gemini_keys[current_key_index])
+                model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
+                model.safety_settings = safety_settings
+                await message.edit_text(f"Current Gemini API key set to key {key}.")
+            else:
+                await message.edit_text(f"Invalid key index: {key}.")
+        elif subcommand == "del" and key:
+            index = int(key) - 1
+            if 0 <= index < len(gemini_keys):
+                del gemini_keys[index]
+                db.set(collection, "gemini_keys", gemini_keys)
+                if current_key_index >= len(gemini_keys):
+                    current_key_index = max(0, len(gemini_keys) - 1)
+                    db.set(collection, "current_key_index", current_key_index)
+                await message.edit_text(f"Gemini API key {key} deleted successfully!")
+            else:
+                await message.edit_text(f"Invalid key index: {key}.")
         else:
-            await message.edit_text(f"Invalid key index: {key}.")
-    else:
-        keys_list = "\n".join([f"{i + 1}. {key}" for i, key in enumerate(gemini_keys)])
-        current_key = gemini_keys[current_key_index] if gemini_keys else "None"
-        await message.edit_text(f"<b>Gemini API keys:</b>\n\n<code>{keys_list}</code>\n\n<b>Current key:</b> <code>{current_key}</code>")
+            keys_list = "\n".join([f"{i + 1}. {key}" for i, key in enumerate(gemini_keys)])
+            current_key = gemini_keys[current_key_index] if gemini_keys else "None"
+            await message.edit_text(f"<b>Gemini API keys:</b>\n\n<code>{keys_list}</code>\n\n<b>Current key:</b> <code>{current_key}</code>")
 
-    await asyncio.sleep(1)
-except Exception as e:
-    await client.send_message("me", f"An error occurred in the `setgkey` command:\n\n{str(e)}")
+        await asyncio.sleep(1)
+    except Exception as e:
+        await client.send_message("me", f"An error occurred in the `setgkey` command:\n\n{str(e)}")
 
 modules_help["gchat"] = {
     "gchat on [user_id]": "Enable gchat for the specified user or current user in the chat.",
