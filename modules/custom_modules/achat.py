@@ -366,22 +366,65 @@ async def gchat_command(client: Client, message: Message):
 async def set_custom_role(client: Client, message: Message):
     try:
         parts = message.text.strip().split()
-        custom_role = " ".join(parts[2:]).strip()
         user_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else message.chat.id
+        custom_role = " ".join(parts[2:]).strip()
 
         if not custom_role:
             db.set(collection, f"custom_roles.{user_id}", default_bot_role)
-            db.set(collection, f"chat_history.{user_id}", None)
+            db.set(collection, f"active_role.{user_id}", "primary")
             await message.edit_text(f"Role reset to default for user {user_id}.")
         else:
             db.set(collection, f"custom_roles.{user_id}", custom_role)
-            db.set(collection, f"chat_history.{user_id}", None)
+            db.set(collection, f"active_role.{user_id}", "primary")
             await message.edit_text(f"Role set successfully for user {user_id}!\n<b>New Role:</b> {custom_role}")
 
         await asyncio.sleep(1)
         await message.delete()
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `role` command:\n\n{str(e)}")
+
+@Client.on_message(filters.command("switch_role", prefix) & filters.me)
+async def switch_role(client: Client, message: Message):
+    try:
+        parts = message.text.strip().split()
+        user_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else message.chat.id
+
+        primary_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
+        secondary_role = db.get(collection, f"secondary_roles.{user_id}") or default_secondary_role
+        active_role = db.get(collection, f"active_role.{user_id}") or "primary"
+
+        if active_role == "primary":
+            db.set(collection, f"custom_roles.{user_id}", secondary_role)
+            db.set(collection, f"active_role.{user_id}", "secondary")
+            await message.edit_text(f"Switched to secondary role for user {user_id}.\n<b>Current Role:</b> {secondary_role}")
+        else:
+            db.set(collection, f"custom_roles.{user_id}", primary_role)
+            db.set(collection, f"active_role.{user_id}", "primary")
+            await message.edit_text(f"Switched to primary role for user {user_id}.\n<b>Current Role:</b> {primary_role}")
+
+        await asyncio.sleep(1)
+        await message.delete()
+    except Exception as e:
+        await client.send_message("me", f"An error occurred in the `switch_role` command:\n\n{str(e)}")
+
+@Client.on_message(filters.command("set_secondary_role", prefix) & filters.me)
+async def set_secondary_role(client: Client, message: Message):
+    try:
+        parts = message.text.strip().split()
+        custom_role = " ".join(parts[2:]).strip()
+        user_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else message.chat.id
+
+        if not custom_role:
+            db.set(collection, f"secondary_roles.{user_id}", default_secondary_role)
+            await message.edit_text(f"Secondary role reset to default for user {user_id}.")
+        else:
+            db.set(collection, f"secondary_roles.{user_id}", custom_role)
+            await message.edit_text(f"Secondary role set successfully for user {user_id}!\n<b>New Secondary Role:</b> {custom_role}")
+
+        await asyncio.sleep(1)
+        await message.delete()
+    except Exception as e:
+        await client.send_message("me", f"An error occurred in the `set_secondary_role` command:\n\n{str(e)}")
 
 @Client.on_message(filters.command("setgkey", prefix) & filters.me)
 async def set_gemini_key(client: Client, message: Message):
@@ -432,7 +475,9 @@ modules_help["gchat"] = {
     "gchat off [user_id]": "Disable gchat for the specified user or current user in the chat.",
     "gchat del [user_id]": "Delete the chat history for the specified user or current user.",
     "gchat all": "Toggle gchat for all users globally.",
-    "role [user_id] <custom role>": "Set a custom role for the bot for the specified user or current user and clear existing chat history.",
+    "role [user_id] <custom role>": "Set a custom role for the bot for the specified user or current user.",
+    "set_secondary_role [user_id] <custom role>": "Set a custom secondary role for the bot for the specified user or current user.",
+    "switch_role [user_id]": "Switch between primary and secondary roles for the specified user or current user.",
     "setgkey add <key>": "Add a new Gemini API key.",
     "setgkey set <index>": "Set the current Gemini API key by index.",
     "setgkey del <index>": "Delete a Gemini API key by index.",
