@@ -116,7 +116,7 @@ async def handle_voice_message(client, chat_id, bot_response):
             return True
     return False
 
-@Client.on_message(filters.sticker & filters.private & ~filters.me & ~filters.bot)
+@Client.on_message(filters.sticker & filters.private & ~filters.me & ~filters.bot, group=1)
 async def handle_sticker(client: Client, message: Message):
     try:
         user_id = message.from_user.id
@@ -128,7 +128,7 @@ async def handle_sticker(client: Client, message: Message):
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `handle_sticker` function:\n\n{str(e)}")
 
-@Client.on_message(filters.text & filters.private & ~filters.me & ~filters.bot)
+@Client.on_message(filters.text & filters.private & ~filters.me & ~filters.bot, group=1)
 async def gchat(client: Client, message: Message):
     try:
         user_id, user_name, user_message = message.from_user.id, message.from_user.first_name or "User", message.text.strip()
@@ -175,7 +175,7 @@ async def gchat(client: Client, message: Message):
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
 
-@Client.on_message(filters.private & ~filters.me & ~filters.bot)
+@Client.on_message(filters.private & ~filters.me & ~filters.bot, group=1)
 async def handle_files(client: Client, message: Message):
     file_path = None
     try:
