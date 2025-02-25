@@ -16,40 +16,50 @@ import pytz
 genai = import_library("google.generativeai", "google-generativeai")
 safety_settings = [{"category": cat, "threshold": "BLOCK_NONE"} for cat in [
     "HARM_CATEGORY_DANGEROUS_CONTENT", "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", 
-    "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_UNSPECIFIED"
-]]
+    "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_UNSPECIFIED"]]
 
-generation_config = {"max_output_tokens": 40}
+# Configuration for maximum output tokens
+generation_config = {
+    "max_output_tokens": 40,
+}
+
 model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
 model.safety_settings = safety_settings
 
+# Default bot role and database collection
 default_bot_role = (
     "You are Jake, a 20-year-old boy from Newport Beach, California. "
     "Just respond normally and avoid buzzwords."
 )
 collection = "custom.gchat"
-la_timezone = pytz.timezone("America/Los_Angeles")
 
+# Database initialization
 enabled_users = db.get(collection, "enabled_users") or []
 disabled_users = db.get(collection, "disabled_users") or []
 gchat_for_all = db.get(collection, "gchat_for_all") or False
+
+# List of random smileys
 smileys = ["-.-", "):", ":)", "*.*", ")*"]
+
+# Set timezone to Los Angeles
+la_timezone = pytz.timezone("America/Los_Angeles")
 
 def get_chat_history(user_id, bot_role, user_message, user_name):
     chat_history = db.get(collection, f"chat_history.{user_id}") or [f"Role: {bot_role}"]
-    chat_history.append(f"{user_name}: {user_message}")
+    chat_history.append(f"{user_name}: {user_message}")  # Removed timestamp
     db.set(collection, f"chat_history.{user_id}", chat_history)
     return chat_history
 
 def build_prompt(bot_role, chat_history, user_message):
     timestamp = datetime.datetime.now(la_timezone).strftime("%Y-%m-%d %H:%M:%S")
     chat_context = "\n".join(chat_history)
-    return (
+    prompt = (
         f"Time: {timestamp}\n"
         f"Role: {bot_role}\n"
         f"Chat History:\n{chat_context}\n"
         f"User Message:\n{user_message}"
     )
+    return prompt
 
 async def generate_gemini_response(input_data, chat_history, user_id):
     retries = 3
@@ -105,26 +115,27 @@ async def handle_voice_message(client, chat_id, bot_response):
             return True
     return False
 
-async def handle_smiley_reply(client, message):
-    random_smiley = random.choice(smileys)
-    await asyncio.sleep(random.uniform(5, 10))
-    await message.reply_text(random_smiley)
-
 @Client.on_message(filters.sticker & filters.private & ~filters.me & ~filters.bot, group=1)
 async def handle_sticker(client: Client, message: Message):
     try:
         user_id = message.from_user.id
-        if user_id not in disabled_users and (gchat_for_all or user_id in enabled_users):
-            await handle_smiley_reply(client, message)
+        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
+            return
+        random_smiley = random.choice(smileys)
+        await asyncio.sleep(random.uniform(5, 10))
+        await message.reply_text(random_smiley)
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `handle_sticker` function:\n\n{str(e)}")
 
-@Client.on_message(filters.animation & filters.private & ~filters.me & ~filters.bot, group=1)
+@Client.on_message(filters.animation & filters.private & ~filters.me & ~filters.bot, group=1)  # Added this handler for GIFs (animations)
 async def handle_gif(client: Client, message: Message):
     try:
         user_id = message.from_user.id
-        if user_id not in disabled_users and (gchat_for_all or user_id in enabled_users):
-            await handle_smiley_reply(client, message)
+        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
+            return
+        random_smiley = random.choice(smileys)
+        await asyncio.sleep(random.uniform(5, 10))
+        await message.reply_text(random_smiley)
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `handle_gif` function:\n\n{str(e)}")
 
@@ -137,37 +148,43 @@ async def gchat(client: Client, message: Message):
 
         bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
         chat_history = get_chat_history(user_id, bot_role, user_message, user_name)
+
         await asyncio.sleep(random.choice([4, 8, 10]))
         await send_typing_action(client, message.chat.id, user_message)
 
-        prompt = build_prompt(bot_role, chat_history, user_message)
-        response = await generate_gemini_response(prompt, chat_history, user_id)
+        gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
+        current_key_index = db.get(collection, "current_key_index") or 0
+        retries = len(gemini_keys) * 2
 
-        if response and await handle_voice_message(client, message.chat.id, response):
-            return
+        while retries > 0:
+            try:
+                current_key = gemini_keys[current_key_index]
+                genai.configure(api_key=current_key)
+                model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
+                model.safety_settings = safety_settings
 
-        if response:
-            await message.reply_text(response)
-        else:
-            await message.reply_text("Sorry, I couldn't generate a response.")
+                prompt = build_prompt(bot_role, chat_history, user_message)
+                response = model.start_chat().send_message(prompt)
+                bot_response = response.text.strip()
+
+                chat_history.append(bot_response)
+                db.set(collection, f"chat_history.{user_id}", chat_history)
+
+                if await handle_voice_message(client, message.chat.id, bot_response):
+                    return
+
+                return await message.reply_text(bot_response)
+            except Exception as e:
+                if "429" in str(e) or "invalid" in str(e).lower():
+                    retries -= 1
+                    if retries % 2 == 0:
+                        current_key_index = (current_key_index + 1) % len(gemini_keys)
+                        db.set(collection, "current_key_index", current_key_index)
+                    await asyncio.sleep(4)
+                else:
+                    raise e
     except Exception as e:
-        await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
-
-async def process_file(client, message, user_id, bot_role, caption, chat_history, file_path, file_type):
-    try:
-        uploaded_file = await upload_file_to_gemini(file_path, file_type)
-        prompt_text = f"User has sent a {file_type}." + (f" Caption: {caption}" if caption else "")
-        prompt = build_prompt(bot_role, chat_history, prompt_text)
-        input_data = [prompt, uploaded_file]
-        response = await generate_gemini_response(input_data, chat_history, user_id)
-
-        if await handle_voice_message(client, message.chat.id, response):
-            return
-
-        await message.reply(response, reply_to_message_id=message.id)
-    finally:
-        if file_path and os.path.exists(file_path):
-            os.remove(file_path)
+        return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
 
 @Client.on_message(filters.private & ~filters.me & ~filters.bot, group=1)
 async def handle_files(client: Client, message: Message):
@@ -180,6 +197,7 @@ async def handle_files(client: Client, message: Message):
         bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
         caption = message.caption.strip() if message.caption else ""
         chat_history = get_chat_history(user_id, bot_role, caption, user_name)
+        chat_context = "\n".join(chat_history)
 
         if message.photo:
             if not hasattr(client, "image_buffer"):
@@ -227,10 +245,22 @@ async def handle_files(client: Client, message: Message):
             file_type, file_path = "document", await client.download_media(message.document)
 
         if file_path and file_type:
-            await process_file(client, message, user_id, bot_role, caption, chat_history, file_path, file_type)
+            uploaded_file = await upload_file_to_gemini(file_path, file_type)
+            prompt_text = f"User has sent a {file_type}." + (f" Caption: {caption}" if caption else "")
+            prompt = build_prompt(bot_role, chat_history, prompt_text)
+            input_data = [prompt, uploaded_file]
+            response = await generate_gemini_response(input_data, chat_history, user_id)
+
+            if await handle_voice_message(client, message.chat.id, response):
+                return
+
+            return await message.reply(response, reply_to_message_id=message.id)
 
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `handle_files` function:\n\n{str(e)}")
+    finally:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
 
 @Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
