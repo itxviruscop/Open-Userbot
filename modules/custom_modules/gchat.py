@@ -143,11 +143,13 @@ async def gchat(client: Client, message: Message):
         prompt = build_prompt(bot_role, chat_history, user_message)
         response = await generate_gemini_response(prompt, chat_history, user_id)
 
-        if await handle_voice_message(client, message.chat.id, response):
+        if response and await handle_voice_message(client, message.chat.id, response):
             return
 
-        await message.reply_text(response)
-
+        if response:
+            await message.reply_text(response)
+        else:
+            await message.reply_text("Sorry, I couldn't generate a response.")
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
 
