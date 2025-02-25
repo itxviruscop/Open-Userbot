@@ -137,6 +137,18 @@ async def handle_sticker(client: Client, message: Message):
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `handle_sticker` function:\n\n{str(e)}")
 
+@Client.on_message(filters.animation & filters.private & ~filters.me & ~filters.bot, group=1)  # Added this handler for GIFs (animations)
+async def handle_gif(client: Client, message: Message):
+    try:
+        user_id = message.from_user.id
+        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
+            return
+        random_smiley = random.choice(smileys)
+        await asyncio.sleep(random.uniform(5, 10))
+        await message.reply_text(random_smiley)
+    except Exception as e:
+        await client.send_message("me", f"An error occurred in the `handle_gif` function:\n\n{str(e)}")
+
 @Client.on_message(filters.text & filters.private & ~filters.me & ~filters.bot, group=1)
 async def gchat(client: Client, message: Message):
     try:
