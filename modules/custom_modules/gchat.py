@@ -1,3 +1,4 @@
+ 
 import asyncio
 import os
 import random
@@ -10,6 +11,7 @@ from utils.misc import modules_help, prefix
 from modules.custom_modules.elevenlabs import generate_elevenlabs_audio
 from PIL import Image
 import datetime
+import pytz  # Added for timezone
 
 # Initialize Gemini AI
 genai = import_library("google.generativeai", "google-generativeai")
@@ -40,15 +42,17 @@ gchat_for_all = db.get(collection, "gchat_for_all") or False
 # List of random smileys
 smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
+# Set timezone to Los Angeles
+la_timezone = pytz.timezone("America/Los_Angeles")
+
 def get_chat_history(user_id, bot_role, user_message, user_name):
     chat_history = db.get(collection, f"chat_history.{user_id}") or [f"Role: {bot_role}"]
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    chat_history.append(f"{timestamp} - {user_name}: {user_message}")
+    chat_history.append(f"{user_name}: {user_message}")  # Removed timestamp
     db.set(collection, f"chat_history.{user_id}", chat_history)
     return chat_history
 
 def build_prompt(bot_role, chat_history, user_message):
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.datetime.now(la_timezone).strftime("%Y-%m-%d %H:%M:%S")
     chat_context = "\n".join(chat_history)
     prompt = (
         f"Time: {timestamp}\n"
