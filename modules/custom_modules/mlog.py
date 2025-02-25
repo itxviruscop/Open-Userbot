@@ -28,7 +28,7 @@ def update_group_data(group_id, data):
     db.set(f"custom.mlog", str(group_id), data)
 
 
-@Client.on_message(filters.command(["mlog"], prefix) & filters.me)
+@Client.on_message(filters.command(["mlog"], prefix) & filters.me, group=2)
 async def mlog(_, message: Message):
     if len(message.command) < 2 or message.command[1].lower() not in ["on", "off"]:
         return await message.edit(f"<b>Usage:</b> <code>{prefix}mlog [on/off]</code>")
@@ -38,7 +38,7 @@ async def mlog(_, message: Message):
     await message.edit(f"<b>Media logging is now {'enabled' if status else 'disabled'}</b>")
 
 
-@Client.on_message(filters.command(["msetchat"], prefix) & filters.me)
+@Client.on_message(filters.command(["msetchat"], prefix) & filters.me, group=2)
 async def set_chat(_, message: Message):
     if len(message.command) < 2:
         return await message.edit(f"<b>Usage:</b> <code>{prefix}msetchat [chat_id]</code>")
