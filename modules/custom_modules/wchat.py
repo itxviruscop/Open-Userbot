@@ -61,9 +61,8 @@ smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
 
 def get_chat_history(topic_id, bot_role, user_message, user_name):
-    timestamp = datetime.datetime.now(la_timezone).strftime("%Y-%m-%d %H:%M:%S")
     chat_history = db.get(collection, f"chat_history.{topic_id}") or [f"Role: {bot_role}"]
-    chat_history.append(f"{timestamp} - {user_name}: {user_message}")
+    chat_history.append(f"{user_name}: {user_message}")
     db.set(collection, f"chat_history.{topic_id}", chat_history)
     return chat_history
 
