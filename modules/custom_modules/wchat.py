@@ -8,6 +8,8 @@ from utils.db import db
 from utils.misc import modules_help, prefix
 from modules.custom_modules.elevenlabs import generate_elevenlabs_audio
 from PIL import Image
+import datetime
+import pytz
 
 # Initialize Gemini AI
 genai = import_library("google.generativeai", "google-generativeai")
@@ -21,6 +23,7 @@ safety_settings = [
         "HARM_CATEGORY_UNSPECIFIED",
     ]
 ]
+la_timezone = pytz.timezone("America/Los_Angeles")
 
 # Configuration for maximum output tokens
 generation_config = {
@@ -58,13 +61,22 @@ smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
 
 def get_chat_history(topic_id, bot_role, user_message, user_name):
-    chat_history = db.get(collection, f"chat_history.{topic_id}") or [
-        f"Role: {bot_role}"
-    ]
-    chat_history.append(f"{user_name}: {user_message}")
+    timestamp = datetime.datetime.now(la_timezone).strftime("%Y-%m-%d %H:%M:%S")
+    chat_history = db.get(collection, f"chat_history.{topic_id}") or [f"Role: {bot_role}"]
+    chat_history.append(f"{timestamp} - {user_name}: {user_message}")
     db.set(collection, f"chat_history.{topic_id}", chat_history)
     return chat_history
 
+def build_prompt(bot_role, chat_history, user_message):
+    timestamp = datetime.datetime.now(la_timezone).strftime("%Y-%m-%d %H:%M:%S")
+    chat_context = "\n".join(chat_history)
+    prompt = (
+        f"Time: {timestamp}\n"
+        f"Role: {bot_role}\n"
+        f"Chat History:\n{chat_context}\n"
+        f"User Message:\n{user_message}"
+    )
+    return prompt
 
 async def generate_gemini_response(input_data, chat_history, topic_id):
     retries = 3
@@ -158,27 +170,30 @@ async def handle_sticker(client: Client, message: Message):
             "me", f"An error occurred in the `handle_sticker` function:\n\n{str(e)}"
         )
 
+@Client.on_message(filters.animation & filters.group & ~filters.me)
+async def handle_gif(client: Client, message: Message):
+    try:
+        group_id = str(message.chat.id)
+        topic_id = f"{group_id}:{message.message_thread_id}"
+        if topic_id in disabled_topics or (not wchat_for_all_groups.get(group_id, False) and topic_id not in enabled_topics):
+            return
+        random_smiley = random.choice(smileys)
+        await asyncio.sleep(random.uniform(5, 10))
+        await message.reply_text(random_smiley)
+    except Exception as e:
+        await client.send_message("me", f"An error occurred in the `handle_gif` function:\n\n{str(e)}")
+
 
 @Client.on_message(filters.text & filters.group & ~filters.me)
 async def wchat(client: Client, message: Message):
     try:
-        group_id = str(message.chat.id)  # Convert group_id to string
+        group_id = str(message.chat.id)
         topic_id = f"{group_id}:{message.message_thread_id}"
-        user_name, user_message = (
-            message.from_user.first_name or "User",
-            message.text.strip(),
-        )
-        if topic_id in disabled_topics or (
-            not wchat_for_all_groups.get(group_id, False)
-            and topic_id not in enabled_topics
-        ):
+        user_name, user_message = message.from_user.first_name or "User", message.text.strip()
+        if topic_id in disabled_topics or (not wchat_for_all_groups.get(group_id, False) and topic_id not in enabled_topics):
             return
 
-        bot_role = (
-            db.get(collection, f"custom_roles.{topic_id}")
-            or group_roles.get(group_id)
-            or default_bot_role
-        )
+        bot_role = db.get(collection, f"custom_roles.{topic_id}") or group_roles.get(group_id) or default_bot_role
         chat_history = get_chat_history(topic_id, bot_role, user_message, user_name)
 
         await asyncio.sleep(random.choice([4, 6]))
@@ -195,26 +210,17 @@ async def wchat(client: Client, message: Message):
                 model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
                 model.safety_settings = safety_settings
 
-                chat_context = "\n".join(chat_history)
-                response = model.start_chat().send_message(chat_context)
+                prompt = build_prompt(bot_role, chat_history, user_message)
+                response = model.start_chat().send_message(prompt)
                 bot_response = response.text.strip()
 
                 chat_history.append(bot_response)
                 db.set(collection, f"chat_history.{topic_id}", chat_history)
 
                 if ".el" in bot_response:
-                    return await handle_voice_message(
-                        client,
-                        message.chat.id,
-                        bot_response,
-                        thread_id=message.message_thread_id,
-                    )
+                    return await handle_voice_message(client, message.chat.id, bot_response, thread_id=message.message_thread_id)
 
-                return await client.send_message(
-                    message.chat.id,
-                    bot_response,
-                    message_thread_id=message.message_thread_id,
-                )
+                return await client.send_message(message.chat.id, bot_response, message_thread_id=message.message_thread_id)
             except Exception as e:
                 if "429" in str(e) or "invalid" in str(e).lower():
                     retries -= 1
@@ -225,9 +231,7 @@ async def wchat(client: Client, message: Message):
                 else:
                     raise e
     except Exception as e:
-        return await client.send_message(
-            "me", f"An error occurred in the `wchat` module:\n\n{str(e)}"
-        )
+        return await client.send_message("me", f"An error occurred in the `wchat` module:\n\n{str(e)}")
 
 
 @Client.on_message(filters.group & ~filters.me)
