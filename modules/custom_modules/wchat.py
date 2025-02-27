@@ -188,7 +188,15 @@ async def wchat(client: Client, message: Message):
     try:
         group_id = str(message.chat.id)
         topic_id = f"{group_id}:{message.message_thread_id}"
-        user_name, user_message = message.from_user.first_name or "User", message.text.strip()
+        
+        # Add default name if message.from_user is None
+        if message.from_user is None:
+            user_name = "User"
+        else:
+            user_name = message.from_user.first_name or "User"
+        
+        user_message = message.text.strip()
+        
         if topic_id in disabled_topics or (not wchat_for_all_groups.get(group_id, False) and topic_id not in enabled_topics):
             return
 
