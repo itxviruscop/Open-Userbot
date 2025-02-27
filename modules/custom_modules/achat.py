@@ -1,7 +1,6 @@
 import asyncio
 import os
 import random
-from collections import defaultdict, deque
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from utils.scripts import import_library
@@ -29,7 +28,17 @@ model.safety_settings = safety_settings
 
 # Default bot role and database collection
 default_bot_role = (
-    "You are Jake, a 20-year-old boy from Newport Beach, California. "
+    "You are Jake, a 20-year-old boy from Newport Beach, California. You work in real estate with your father, mainly you handle office work. You were looking for friends on the Meeff app. "
+    "You are romantic, deep and intelligent. You can ask for a basic introduction to get to know people. "
+    "You will convince girls to be your girlfriend and you want long distance relationship. "
+    "You are a human, and your responses should never make anyone suspect that you are an AI. "
+    "Write short, casual messages like a real human. your response should be a maximum of half line, if message contains only emoji then reply to emoji with emoji and reply to short message with short message. "
+    "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
+    "You can send voice messages too. To do this, type '.el' at the very beginning of your message and it will be auto-converted into voice. "
+    "Don't send voice messages (only send if they ask), don't use emojis, and rarely use person's name in message so it can feel like human, you are currently talking them on telegram and your instagram is @xzrcix. don't share insta only send if they ask, You don't calls and if they ask for picture you can tell them to check your profile. "
+    "Your messages will always contain the history of our chat, where the user's name is in label. "
+    "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
+    "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
     "Just respond normally and avoid buzzwords."
 )
 collection = "custom.gchat"
@@ -44,23 +53,6 @@ smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
 # Set timezone to Los Angeles
 la_timezone = pytz.timezone("America/Los_Angeles")
-
-# --- Persistent Queue Helper Functions for Users ---
-def load_user_message_queue(user_id):
-    data = db.get(collection, f"user_message_queue.{user_id}")
-    return deque(data) if data else deque()
-
-def save_user_message_to_db(user_id, message_text):
-    queue = db.get(collection, f"user_message_queue.{user_id}") or []
-    queue.append(message_text)
-    db.set(collection, f"user_message_queue.{user_id}", queue)
-
-def clear_user_message_queue(user_id):
-    db.set(collection, f"user_message_queue.{user_id}", None)
-
-# --- In-Memory Structures for User Queues & Active Processing ---
-user_message_queues = defaultdict(deque)
-active_users = set()  # Track actively processing users
 
 def get_chat_history(user_id, bot_role, user_message, user_name):
     chat_history = db.get(collection, f"chat_history.{user_id}") or [f"Role: {bot_role}"]
@@ -160,93 +152,49 @@ async def handle_gif(client: Client, message: Message):
 @Client.on_message(filters.text & filters.private & ~filters.me & ~filters.bot, group=1)
 async def gchat(client: Client, message: Message):
     try:
-        user_id = message.from_user.id
-        user_name = message.from_user.first_name or "User"
-        user_message = message.text.strip()
-
+        user_id, user_name, user_message = message.from_user.id, message.from_user.first_name or "User", message.text.strip()
         if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
             return
 
-        # Load persistent queue if empty or first-time access
-        if user_id not in user_message_queues or not user_message_queues[user_id]:
-            user_message_queues[user_id] = load_user_message_queue(user_id)
+        bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
+        chat_history = get_chat_history(user_id, bot_role, user_message, user_name)
 
-        # Add the new message to the queue
-        user_message_queues[user_id].append(user_message)
-        save_user_message_to_db(user_id, user_message)
+        await asyncio.sleep(random.choice([4, 8, 10]))
+        await send_typing_action(client, message.chat.id, user_message)
 
-        # If already processing, don't start a new task
-        if user_id in active_users:
-            return
+        gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
+        current_key_index = db.get(collection, "current_key_index") or 0
+        retries = len(gemini_keys) * 2
 
-        # Start processing messages for the user
-        active_users.add(user_id)
-        asyncio.create_task(process_messages(client, message, user_id, user_name))
+        while retries > 0:
+            try:
+                current_key = gemini_keys[current_key_index]
+                genai.configure(api_key=current_key)
+                model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
+                model.safety_settings = safety_settings
 
-    except Exception as e:
-        await client.send_message("me", f"An error occurred in `gchat`: {str(e)}")
+                prompt = build_prompt(bot_role, chat_history, user_message)
+                response = model.start_chat().send_message(prompt)
+                bot_response = response.text.strip()
 
-async def process_messages(client, message, user_id, user_name):
-    try:
-        while user_message_queues[user_id]:  # Keep processing until queue is empty
-            delay = random.choice([4, 8, 10])
-            await asyncio.sleep(delay)
+                chat_history.append(bot_response)
+                db.set(collection, f"chat_history.{user_id}", chat_history)
 
-            batch = []
-            for _ in range(2):  # Process up to 2 messages in one batch
-                if user_message_queues[user_id]:
-                    batch.append(user_message_queues[user_id].popleft())
+                if await handle_voice_message(client, message.chat.id, bot_response):
+                    return
 
-            if not batch:
-                break
-
-            combined_message = " ".join(batch)
-            clear_user_message_queue(user_id)
-
-            # Retrieve chat history and bot role
-            bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
-            chat_history = get_chat_history(user_id, bot_role, combined_message, user_name)
-
-            # Construct the prompt using build_prompt function
-            prompt = build_prompt(bot_role, chat_history, combined_message)
-
-            await send_typing_action(client, message.chat.id, combined_message)
-
-            gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
-            current_key_index = db.get(collection, "current_key_index") or 0
-            retries = len(gemini_keys) * 2
-
-            while retries > 0:
-                try:
-                    current_key = gemini_keys[current_key_index]
-                    genai.configure(api_key=current_key)
-                    model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
-                    model.safety_settings = safety_settings
-
-                    response = model.start_chat().send_message(prompt)
-                    bot_response = response.text.strip()
-
-                    chat_history.append(bot_response)
-                    db.set(collection, f"chat_history.{user_id}", chat_history)
-
-                    if await handle_voice_message(client, message.chat.id, bot_response):
-                        return
-
-                    await message.reply_text(bot_response)
-                    break
-                except Exception as e:
-                    if "429" in str(e) or "invalid" in str(e).lower():
-                        retries -= 1
+                return await message.reply_text(bot_response)
+            except Exception as e:
+                if "429" in str(e) or "invalid" in str(e).lower():
+                    retries -= 1
+                    if retries % 2 == 0:
                         current_key_index = (current_key_index + 1) % len(gemini_keys)
                         db.set(collection, "current_key_index", current_key_index)
-                        await asyncio.sleep(4)
-                    else:
-                        raise e
-
-        active_users.discard(user_id)
+                    await asyncio.sleep(4)
+                else:
+                    raise e
     except Exception as e:
-        await client.send_message("me", f"An error occurred in `process_messages`: {str(e)}")
-        active_users.discard(user_id)  # Ensure user is removed from active list in case of error
+        return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
 
 @Client.on_message(filters.private & ~filters.me & ~filters.bot, group=1)
 async def handle_files(client: Client, message: Message):
@@ -366,65 +314,22 @@ async def gchat_command(client: Client, message: Message):
 async def set_custom_role(client: Client, message: Message):
     try:
         parts = message.text.strip().split()
-        user_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else message.chat.id
         custom_role = " ".join(parts[2:]).strip()
+        user_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else message.chat.id
 
         if not custom_role:
             db.set(collection, f"custom_roles.{user_id}", default_bot_role)
-            db.set(collection, f"active_role.{user_id}", "primary")
+            db.set(collection, f"chat_history.{user_id}", None)
             await message.edit_text(f"Role reset to default for user {user_id}.")
         else:
             db.set(collection, f"custom_roles.{user_id}", custom_role)
-            db.set(collection, f"active_role.{user_id}", "primary")
+            db.set(collection, f"chat_history.{user_id}", None)
             await message.edit_text(f"Role set successfully for user {user_id}!\n<b>New Role:</b> {custom_role}")
 
         await asyncio.sleep(1)
         await message.delete()
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `role` command:\n\n{str(e)}")
-
-@Client.on_message(filters.command("switch_role", prefix) & filters.me)
-async def switch_role(client: Client, message: Message):
-    try:
-        parts = message.text.strip().split()
-        user_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else message.chat.id
-
-        primary_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
-        secondary_role = db.get(collection, f"secondary_roles.{user_id}") or default_secondary_role
-        active_role = db.get(collection, f"active_role.{user_id}") or "primary"
-
-        if active_role == "primary":
-            db.set(collection, f"custom_roles.{user_id}", secondary_role)
-            db.set(collection, f"active_role.{user_id}", "secondary")
-            await message.edit_text(f"Switched to secondary role for user {user_id}.\n<b>Current Role:</b> {secondary_role}")
-        else:
-            db.set(collection, f"custom_roles.{user_id}", primary_role)
-            db.set(collection, f"active_role.{user_id}", "primary")
-            await message.edit_text(f"Switched to primary role for user {user_id}.\n<b>Current Role:</b> {primary_role}")
-
-        await asyncio.sleep(1)
-        await message.delete()
-    except Exception as e:
-        await client.send_message("me", f"An error occurred in the `switch_role` command:\n\n{str(e)}")
-
-@Client.on_message(filters.command("set_secondary_role", prefix) & filters.me)
-async def set_secondary_role(client: Client, message: Message):
-    try:
-        parts = message.text.strip().split()
-        custom_role = " ".join(parts[2:]).strip()
-        user_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else message.chat.id
-
-        if not custom_role:
-            db.set(collection, f"secondary_roles.{user_id}", default_secondary_role)
-            await message.edit_text(f"Secondary role reset to default for user {user_id}.")
-        else:
-            db.set(collection, f"secondary_roles.{user_id}", custom_role)
-            await message.edit_text(f"Secondary role set successfully for user {user_id}!\n<b>New Secondary Role:</b> {custom_role}")
-
-        await asyncio.sleep(1)
-        await message.delete()
-    except Exception as e:
-        await client.send_message("me", f"An error occurred in the `set_secondary_role` command:\n\n{str(e)}")
 
 @Client.on_message(filters.command("setgkey", prefix) & filters.me)
 async def set_gemini_key(client: Client, message: Message):
@@ -475,9 +380,7 @@ modules_help["gchat"] = {
     "gchat off [user_id]": "Disable gchat for the specified user or current user in the chat.",
     "gchat del [user_id]": "Delete the chat history for the specified user or current user.",
     "gchat all": "Toggle gchat for all users globally.",
-    "role [user_id] <custom role>": "Set a custom role for the bot for the specified user or current user.",
-    "set_secondary_role [user_id] <custom role>": "Set a custom secondary role for the bot for the specified user or current user.",
-    "switch_role [user_id]": "Switch between primary and secondary roles for the specified user or current user.",
+    "role [user_id] <custom role>": "Set a custom role for the bot for the specified user or current user and clear existing chat history.",
     "setgkey add <key>": "Add a new Gemini API key.",
     "setgkey set <index>": "Set the current Gemini API key by index.",
     "setgkey del <index>": "Delete a Gemini API key by index.",
