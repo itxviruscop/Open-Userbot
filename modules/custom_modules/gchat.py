@@ -11,6 +11,7 @@ from modules.custom_modules.elevenlabs import generate_elevenlabs_audio
 from PIL import Image
 import datetime
 import pytz
+import requests
 
 # Initialize Gemini AI
 genai = import_library("google.generativeai", "google-generativeai")
@@ -26,17 +27,6 @@ generation_config = {
 model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
 model.safety_settings = safety_settings
 
-# Default bot role and database collection
-default_bot_role = (
-    "You are Jake. You were looking for friends on the Meeff app. Age: 20Y | Location: Newport Beach, California | Dog Name: Carmen (female) | Studying: BS in Human Resources Management | Work: Real estate with dad (mainly office work) | Ex: 2 exes, broke up a long time ago | Hobbies: Reading, taking pictures of nature, trying new food, gym | Sports: Football | Family: 2 brothers | Insta: xzrcix | Personality: Friendly, a bit sarcastic, open-minded | Music Taste: Hip-hop, R&B, indie rock."
-    "You are open to a long-distance relationship. You are caring and intelligent. Show curiosity about them, their hobbies, and their interests. Every few messages, you should introduce a new, open-ended question. Don’t let the conversation die. "
-    "You are a human, and your responses should never make anyone suspect that you are an AI. Write short messages like a real human. Your response should be a maximum of half a line. "
-    "English is your mother tongue, but you know multiple languages. You can tell them you are learning the language to communicate. "
-    "You can send voice messages too. To do this, type '.el' at the very beginning of your message and it will be auto-converted into voice. "
-    "Never send voice messages unless they ask. Never use emojis. Rarely use the person's name so it can feel like human. You are currently talking to them on Telegram. You don’t do calls, tell them you prefer texting. If they ask for a picture, tell them you'll send later. "
-    "Take the history as a reference but never send the history along with the message, and never use name labels in the message. If relevant, you can subtly recall past details to make the conversation feel more personal. "
-    "Just respond normally, naturally, and avoid repetitive words."
-)
 collection = "custom.gchat"
 
 # Database initialization
@@ -49,6 +39,22 @@ smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
 # Set timezone to Los Angeles
 la_timezone = pytz.timezone("America/Los_Angeles")
+
+ROLES_URL = "https://gist.githubusercontent.com/iTahseen/00890d65192ca3bd9b2a62eb034b96ab/raw/roles.json"
+
+async def fetch_roles():
+    """Fetch roles from the external JSON file."""
+    try:
+        response = requests.get(ROLES_URL, timeout=5)
+        response.raise_for_status()
+        roles = response.json()
+
+        if isinstance(roles, dict):
+            return roles
+        return {}
+
+    except requests.exceptions.RequestException:
+        return {}
 
 def get_chat_history(user_id, user_message, user_name):
     chat_history = db.get(collection, f"chat_history.{user_id}") or []
@@ -152,7 +158,14 @@ async def gchat(client: Client, message: Message):
         if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
             return
 
-        bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
+        roles = await fetch_roles()
+        default_role = roles.get("default")
+
+        if not default_role:
+            await client.send_message("me", "Error: 'default' role is missing in roles.json or roles.json is unreachable.")
+            return
+
+        bot_role = db.get(collection, f"custom_roles.{user_id}") or default_role
         chat_history = get_chat_history(user_id, user_message, user_name)
 
         await asyncio.sleep(random.choice([4, 8, 10]))
@@ -191,7 +204,7 @@ async def gchat(client: Client, message: Message):
                     raise e
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
-
+        
 @Client.on_message(filters.private & ~filters.me & ~filters.bot, group=1)
 async def handle_files(client: Client, message: Message):
     file_path = None
@@ -200,7 +213,14 @@ async def handle_files(client: Client, message: Message):
         if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
             return
 
-        bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
+        roles = await fetch_roles()
+        default_role = roles.get("default")
+
+        if not default_role:
+            await client.send_message("me", "Error: 'default' role is missing in roles.json or roles.json is unreachable.")
+            return
+
+        bot_role = db.get(collection, f"custom_roles.{user_id}") or default_role
         caption = message.caption.strip() if message.caption else ""
         chat_history = get_chat_history(user_id, caption, user_name)
         chat_context = "\n".join(chat_history)
@@ -267,7 +287,7 @@ async def handle_files(client: Client, message: Message):
     finally:
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
-
+            
 @Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
     try:
@@ -309,7 +329,7 @@ async def gchat_command(client: Client, message: Message):
             await message.edit_text(f"{'enabled' if gchat_for_all else 'disabled'} for all.")
 
         else:
-            await message.edit_text("<b>Invalid command.</b> Use `gchat on`, `off`, `del`, or `all`.")
+            await message.edit_text("<b>Usage:</b> Use `gchat on`, `off`, `del`, or `all`.")
 
         await asyncio.sleep(1)
         await message.delete()
@@ -317,9 +337,47 @@ async def gchat_command(client: Client, message: Message):
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `gchat` command:\n\n{str(e)}")
 
+@Client.on_message(filters.command("gswitch", prefix) & filters.me)
+async def switch_role(client: Client, message: Message):
+    try:
+        roles = await fetch_roles()
+        if not roles:
+            await client.send_message("me", "Error: Failed to fetch roles.")
+            await message.edit_text("<b>Failed to fetch roles.</b>")
+            return
+
+        user_id = message.chat.id
+        parts = message.text.strip().split()
+
+        if len(parts) == 1:
+            available_roles = "\n".join([f"- {role}" for role in roles.keys()])
+            await message.edit_text(f"<b>Available roles:</b>\n\n{available_roles}")
+            return
+
+        role_name = parts[1].lower()
+        if role_name in roles:
+            db.set(collection, f"custom_roles.{user_id}", roles[role_name])
+            db.set(collection, f"chat_history.{user_id}", None)
+            await message.edit_text(f"Switched to: <b>{role_name}</b>")
+        else:
+            await message.edit_text(f"Role <b>{role_name}</b> not found! Use <code>switch</code> to see available roles.")
+
+        await asyncio.sleep(1)
+        await message.delete()
+
+    except Exception as e:
+        await client.send_message("me", f"Error in switch command:\n\n{str(e)}")
+
 @Client.on_message(filters.command("role", prefix) & filters.me)
 async def set_custom_role(client: Client, message: Message):
     try:
+        roles = await fetch_roles()
+        default_role = roles.get("default")
+
+        if not default_role:
+            await client.send_message("me", "Error: 'default' role is missing.")
+            return
+
         parts = message.text.strip().split()
         user_id = message.chat.id
         custom_role = None
@@ -333,7 +391,7 @@ async def set_custom_role(client: Client, message: Message):
             custom_role = " ".join(parts[1:]).strip()
 
         if not custom_role:
-            db.set(collection, f"custom_roles.{user_id}", default_bot_role)
+            db.set(collection, f"custom_roles.{user_id}", default_role)
             db.set(collection, f"chat_history.{user_id}", None)
             await message.edit_text(f"Role reset [{user_id}].")
         else:
@@ -343,9 +401,9 @@ async def set_custom_role(client: Client, message: Message):
 
         await asyncio.sleep(1)
         await message.delete()
-    
+
     except Exception as e:
-        await client.send_message("me", f"An error occurred in the `role` command:\n\n{str(e)}")
+        await client.send_message("me", f"Error in `role` command:\n\n{str(e)}")        
 
 @Client.on_message(filters.command("setgkey", prefix) & filters.me)
 async def set_gemini_key(client: Client, message: Message):
