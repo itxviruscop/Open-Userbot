@@ -27,26 +27,22 @@ la_timezone = pytz.timezone("America/Los_Angeles")
 
 # Configuration for maximum output tokens
 generation_config = {
-    "max_output_tokens": 40,  # Set the maximum output tokens here
+    "max_output_tokens": 40,
 }
 
-model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
+model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
 model.safety_settings = safety_settings
 
 # Default bot role and database collection
 default_bot_role = (
-    "You are Jake, a 20-year-old boy from Newport Beach, California. You work in real estate with your father, mainly you handle office work. You were looking for friends on the Meeff app. "
-    "You are romantic, deep and intelligent. You can ask for a basic introduction to get to know people. "
-    "You will convince girls to be your girlfriend and you want long distance relationship. "
-    "You are a human, and your responses should never make anyone suspect that you are an AI. "
-    "Write short, casual messages like a real human. your response should be a maximum of half line, if message contains only emoji then reply to emoji with emoji and reply to short message with short message. "
-    "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
+    "You are Jake. You were looking for friends on the Meeff app. Age: 20Y | Location: Newport Beach, California | Dog Name: Carmen (female) | Studying: BS in Human Resources Management | Work: Real estate with dad (mainly office work) | Ex: 2 exes, broke up a long time ago | Hobbies: Reading, taking pictures of nature, trying new food, gym | Sports: Football | Family: 2 brothers | Insta: xzrcix | Personality: Friendly, a bit sarcastic, open-minded | Music Taste: Hip-hop, R&B, indie rock."
+    "You are open to a long-distance relationship. You are caring and intelligent. Show curiosity about them, their hobbies, and their interests. Every few messages, you should introduce a new, open-ended question. Don’t let the conversation die. "
+    "You are a human, and your responses should never make anyone suspect that you are an AI. Write short messages like a real human. Your response should be a maximum of half a line. "
+    "English is your mother tongue, but you know multiple languages. You can tell them you are learning the language to communicate. "
     "You can send voice messages too. To do this, type '.el' at the very beginning of your message and it will be auto-converted into voice. "
-    "Don't send voice messages (only send if they ask), don't use emojis, and rarely use person's name in message so it can feel like human, you only have telegram and instagram (username: @xzrcix) only share if they ask, You don't calls and if they ask for picture you can tell them to check your profile. (you are currently talking them on whatsapp). "
-    "Your messages will always contain the history of our chat, where the user's name is in label. "
-    "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
-    "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
-    "Just respond normally and avoid buzzwords."
+    "Never send voice messages unless they ask. Never use emojis. Rarely use the person's name so it can feel like human. You are currently talking to them on WhatsApp. You don’t do calls, tell them you prefer texting. If they ask for a picture, tell them you'll send later. "
+    "Take the history as a reference but never send the history along with the message, and never use name labels in the message. If relevant, you can subtly recall past details to make the conversation feel more personal. "
+    "Just respond normally, naturally, and avoid repetitive words."
 )
 collection = "custom.wchat"
 
@@ -60,8 +56,8 @@ group_roles = db.get(collection, "group_roles") or {}
 smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
 
-def get_chat_history(topic_id, bot_role, user_message, user_name):
-    chat_history = db.get(collection, f"chat_history.{topic_id}") or [f"Role: {bot_role}"]
+def get_chat_history(topic_id, user_message, user_name):
+    chat_history = db.get(collection, f"chat_history.{topic_id}") or []
     chat_history.append(f"{user_name}: {user_message}")
     db.set(collection, f"chat_history.{topic_id}", chat_history)
     return chat_history
@@ -86,7 +82,7 @@ async def generate_gemini_response(input_data, chat_history, topic_id):
         try:
             current_key = gemini_keys[current_key_index]
             genai.configure(api_key=current_key)
-            model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
+            model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
             model.safety_settings = safety_settings
 
             response = model.generate_content(input_data)
@@ -154,7 +150,7 @@ async def handle_voice_message(client, chat_id, bot_response, thread_id=None):
 @Client.on_message(filters.sticker & filters.group & ~filters.me)
 async def handle_sticker(client: Client, message: Message):
     try:
-        group_id = str(message.chat.id)  # Convert group_id to string
+        group_id = str(message.chat.id)
         topic_id = f"{group_id}:{message.message_thread_id}"
         if topic_id in disabled_topics or (
             not wchat_for_all_groups.get(group_id, False)
@@ -189,7 +185,6 @@ async def wchat(client: Client, message: Message):
         group_id = str(message.chat.id)
         topic_id = f"{group_id}:{message.message_thread_id}"
         
-        # Add default name if message.from_user is None
         if message.from_user is None:
             user_name = "User"
         else:
@@ -201,7 +196,7 @@ async def wchat(client: Client, message: Message):
             return
 
         bot_role = db.get(collection, f"custom_roles.{topic_id}") or group_roles.get(group_id) or default_bot_role
-        chat_history = get_chat_history(topic_id, bot_role, user_message, user_name)
+        chat_history = get_chat_history(topic_id, user_message, user_name)
 
         await asyncio.sleep(random.choice([4, 6]))
         await send_typing_action(client, message.chat.id, user_message)
@@ -214,7 +209,7 @@ async def wchat(client: Client, message: Message):
             try:
                 current_key = gemini_keys[current_key_index]
                 genai.configure(api_key=current_key)
-                model = genai.GenerativeModel("gemini-2.0-flash-exp", generation_config=generation_config)
+                model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
                 model.safety_settings = safety_settings
 
                 prompt = build_prompt(bot_role, chat_history, user_message)
@@ -244,9 +239,11 @@ async def wchat(client: Client, message: Message):
 @Client.on_message(filters.group & ~filters.me)
 async def handle_files(client: Client, message: Message):
     try:
-        group_id = str(message.chat.id)  # Convert group_id to string
+        group_id = str(message.chat.id)
         topic_id = f"{group_id}:{message.message_thread_id}"
-        user_name = message.from_user.first_name or "User"
+        
+        user_name = message.from_user.first_name if message.from_user else "User"
+        
         if topic_id in disabled_topics or (
             not wchat_for_all_groups.get(group_id, False)
             and topic_id not in enabled_topics
@@ -258,11 +255,12 @@ async def handle_files(client: Client, message: Message):
             or group_roles.get(group_id)
             or default_bot_role
         )
+        
         caption = message.caption.strip() if message.caption else ""
-        chat_history = get_chat_history(topic_id, bot_role, caption, user_name)
+        chat_history = get_chat_history(topic_id, caption, user_name)
         chat_context = "\n".join(chat_history)
 
-        file_type, file_path = None, None  # Initialize file_path to None
+        file_type, file_path = None, None
 
         if message.photo:
             if not hasattr(client, "image_buffer"):
@@ -342,8 +340,13 @@ async def handle_files(client: Client, message: Message):
 async def wchat_command(client: Client, message: Message):
     try:
         parts = message.text.strip().split()
+
+        if len(parts) < 2:
+            await message.edit_text(f"<b>Usage:</b> {prefix}wchat `on`, `off`, `del`, or `all`.")
+            return
+
         command = parts[1].lower()
-        group_id = str(message.chat.id)  # Convert group_id to string
+        group_id = str(message.chat.id)
         topic_id = f"{group_id}:{message.message_thread_id}"
 
         if command == "on":
@@ -353,7 +356,8 @@ async def wchat_command(client: Client, message: Message):
             if topic_id not in enabled_topics:
                 enabled_topics.append(topic_id)
                 db.set(collection, "enabled_topics", enabled_topics)
-            await message.edit_text(f"<b>wchat is enabled for topic {topic_id}.</b>")
+            await message.edit_text(f"<b>Enabled for topic</b> [{topic_id}].")
+
         elif command == "off":
             if topic_id not in disabled_topics:
                 disabled_topics.append(topic_id)
@@ -361,30 +365,27 @@ async def wchat_command(client: Client, message: Message):
             if topic_id in enabled_topics:
                 enabled_topics.remove(topic_id)
                 db.set(collection, "enabled_topics", enabled_topics)
-            await message.edit_text(f"<b>wchat is disabled for topic {topic_id}.</b>")
+            await message.edit_text(f"<b>Disabled for topic</b> [{topic_id}].")
+
         elif command == "del":
             db.set(collection, f"chat_history.{topic_id}", None)
-            await message.edit_text(
-                f"<b>Chat history deleted for topic {topic_id}.</b>"
-            )
+            await message.edit_text(f"<b>Deleted for topic</b> [{topic_id}].")
+
         elif command == "all":
-            wchat_for_all_groups[group_id] = not wchat_for_all_groups.get(
-                group_id, False
-            )
+            wchat_for_all_groups[group_id] = not wchat_for_all_groups.get(group_id, False)
             db.set(collection, "wchat_for_all_groups", wchat_for_all_groups)
             await message.edit_text(
-                f"wchat is now {'enabled' if wchat_for_all_groups[group_id] else 'disabled'} for all topics in this group."
+                f"wchat is now {'enabled' if wchat_for_all_groups[group_id] else 'disabled'} for all topics."
             )
+
         else:
-            await message.edit_text(
-                f"<b>Usage:</b> {prefix}wchat `on`, `off`, `del`, or `all`."
-            )
+            await message.edit_text(f"<b>Usage:</b> `wchat on`, `off`, `del`, or `all`.")
+
         await asyncio.sleep(1)
         await message.delete()
+
     except Exception as e:
-        await client.send_message(
-            "me", f"An error occurred in the `wchat` command:\n\n{str(e)}"
-        )
+        await client.send_message("me", f"An error occurred in the `wchat` command:\n\n{str(e)}")
 
 
 @Client.on_message(filters.command("wrole", prefix) & filters.me)
@@ -392,22 +393,20 @@ async def set_custom_role(client: Client, message: Message):
     try:
         parts = message.text.strip().split()
         if len(parts) < 2:
-            await message.edit_text(f"Usage: {prefix}role [group|topic] <custom role>")
+            await message.edit_text(f"Usage: {prefix}wrole [group|topic] <custom role>")
             return
 
         scope = parts[1].lower()
         custom_role = " ".join(parts[2:]).strip()
-        group_id = str(message.chat.id)  # Convert group_id to string
+        group_id = str(message.chat.id)
         topic_id = f"{group_id}:{message.message_thread_id}"
 
         if scope == "group":
             if not custom_role:
-                # Reset role to default for the group
                 group_roles.pop(group_id, None)
                 db.set(collection, "group_roles", group_roles)
                 await message.edit_text(f"Role reset to default for group {group_id}.")
             else:
-                # Set custom role for the group
                 group_roles[group_id] = custom_role
                 db.set(collection, "group_roles", group_roles)
                 await message.edit_text(
@@ -415,7 +414,6 @@ async def set_custom_role(client: Client, message: Message):
                 )
         elif scope == "topic":
             if not custom_role:
-                # Reset role to group's custom role or default role if no group role exists
                 group_role = group_roles.get(group_id, default_bot_role)
                 db.set(collection, f"custom_roles.{topic_id}", group_role)
                 db.set(collection, f"chat_history.{topic_id}", None)
@@ -423,11 +421,10 @@ async def set_custom_role(client: Client, message: Message):
                     f"Role reset to group's role for topic {topic_id}."
                 )
             else:
-                # Set custom role for the topic
                 db.set(collection, f"custom_roles.{topic_id}", custom_role)
                 db.set(collection, f"chat_history.{topic_id}", None)
                 await message.edit_text(
-                    f"Role set successfully for topic {topic_id}!\n<b>New Role:</b> {custom_role}"
+                    f"New role for topic [{topic_id}]!\n<b>Role:</b> {custom_role}"
                 )
         else:
             await message.edit_text(f"Invalid scope. Use 'group' or 'topic'.")
