@@ -18,24 +18,41 @@ genai = import_library("google.generativeai", "google-generativeai")
 safety_settings = [{"category": cat, "threshold": "BLOCK_NONE"} for cat in [
     "HARM_CATEGORY_DANGEROUS_CONTENT", "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", 
     "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_UNSPECIFIED"]]
-generation_config = {"max_output_tokens": 40}
+
+# Configuration for maximum output tokens
+generation_config = {
+    "max_output_tokens": 40,
+}
+
 model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
 model.safety_settings = safety_settings
 
 collection = "custom.gchat"
+
+# Database initialization
 enabled_users = db.get(collection, "enabled_users") or []
 disabled_users = db.get(collection, "disabled_users") or []
 gchat_for_all = db.get(collection, "gchat_for_all") or False
+
+# List of random smileys
 smileys = ["-.-", "):", ":)", "*.*", ")*"]
+
+# Set timezone to Los Angeles
 la_timezone = pytz.timezone("America/Los_Angeles")
+
 ROLES_URL = "https://gist.githubusercontent.com/iTahseen/00890d65192ca3bd9b2a62eb034b96ab/raw/roles.json"
 
 async def fetch_roles():
+    """Fetch roles from the external JSON file."""
     try:
         response = requests.get(ROLES_URL, timeout=5)
         response.raise_for_status()
         roles = response.json()
-        return roles if isinstance(roles, dict) else {}
+
+        if isinstance(roles, dict):
+            return roles
+        return {}
+
     except requests.exceptions.RequestException:
         return {}
 
@@ -48,12 +65,13 @@ def get_chat_history(user_id, user_message, user_name):
 def build_prompt(bot_role, chat_history, user_message):
     timestamp = datetime.datetime.now(la_timezone).strftime("%Y-%m-%d %H:%M:%S")
     chat_context = "\n".join(chat_history)
-    return (
+    prompt = (
         f"Time: {timestamp}\n"
         f"Role: {bot_role}\n"
         f"Chat History:\n{chat_context}\n"
         f"User Message:\n{user_message}"
     )
+    return prompt
 
 async def generate_gemini_response(input_data, chat_history, user_id):
     retries = 3
@@ -66,6 +84,7 @@ async def generate_gemini_response(input_data, chat_history, user_id):
             genai.configure(api_key=current_key)
             model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
             model.safety_settings = safety_settings
+
             response = model.generate_content(input_data)
             bot_response = response.text.strip()
 
@@ -108,39 +127,29 @@ async def handle_voice_message(client, chat_id, bot_response):
             return True
     return False
 
-async def handle_media(client, message, user_id, chat_history, bot_role, caption):
-    file_type, file_path = None, None
-    media = message.photo or message.video or message.video_note or message.audio or message.voice or message.document
-    if media:
-        file_type = "photo" if message.photo else "video" if message.video or message.video_note else "audio" if message.audio or message.voice else "pdf" if message.document and message.document.file_name.endswith(".pdf") else "document"
-        file_path = await client.download_media(media)
-    if file_path:
-        uploaded_file = await upload_file_to_gemini(file_path, file_type)
-        prompt_text = f"User has sent a {file_type}." + (f" Caption: {caption}" if caption else "")
-        prompt = build_prompt(bot_role, chat_history, prompt_text)
-        input_data = [prompt, uploaded_file]
-        response = await generate_gemini_response(input_data, chat_history, user_id)
-
-        if await handle_voice_message(client, message.chat.id, response):
-            return
-
-        await message.reply(response, reply_to_message_id=message.id)
-        os.remove(file_path)
-
 @Client.on_message(filters.sticker & filters.private & ~filters.me & ~filters.bot, group=1)
 async def handle_sticker(client: Client, message: Message):
     try:
         user_id = message.from_user.id
         if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
             return
+        random_smiley = random.choice(smileys)
         await asyncio.sleep(random.uniform(5, 10))
-        await message.reply_text(random.choice(smileys))
+        await message.reply_text(random_smiley)
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `handle_sticker` function:\n\n{str(e)}")
 
-@Client.on_message(filters.animation & filters.private & ~filters.me & ~filters.bot, group=1)
+@Client.on_message(filters.animation & filters.private & ~filters.me & ~filters.bot, group=1)  # Added this handler for GIFs (animations)
 async def handle_gif(client: Client, message: Message):
-    await handle_sticker(client, message)
+    try:
+        user_id = message.from_user.id
+        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
+            return
+        random_smiley = random.choice(smileys)
+        await asyncio.sleep(random.uniform(5, 10))
+        await message.reply_text(random_smiley)
+    except Exception as e:
+        await client.send_message("me", f"An error occurred in the `handle_gif` function:\n\n{str(e)}")
 
 @Client.on_message(filters.text & filters.private & ~filters.me & ~filters.bot, group=1)
 async def gchat(client: Client, message: Message):
@@ -151,6 +160,7 @@ async def gchat(client: Client, message: Message):
 
         roles = await fetch_roles()
         default_role = roles.get("default")
+
         if not default_role:
             await client.send_message("me", "Error: 'default' role is missing in roles.json or roles.json is unreachable.")
             return
@@ -161,9 +171,17 @@ async def gchat(client: Client, message: Message):
         await asyncio.sleep(random.choice([4, 8, 10]))
         await send_typing_action(client, message.chat.id, user_message)
 
-        retries = len(db.get(collection, "gemini_keys") or [gemini_key]) * 2
+        gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
+        current_key_index = db.get(collection, "current_key_index") or 0
+        retries = len(gemini_keys) * 2
+
         while retries > 0:
             try:
+                current_key = gemini_keys[current_key_index]
+                genai.configure(api_key=current_key)
+                model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
+                model.safety_settings = safety_settings
+
                 prompt = build_prompt(bot_role, chat_history, user_message)
                 response = model.start_chat().send_message(prompt)
                 bot_response = response.text.strip()
@@ -174,20 +192,22 @@ async def gchat(client: Client, message: Message):
                 if await handle_voice_message(client, message.chat.id, bot_response):
                     return
 
-                await message.reply_text(bot_response)
-                return
+                return await message.reply_text(bot_response)
             except Exception as e:
                 if "429" in str(e) or "invalid" in str(e).lower():
                     retries -= 1
-                    db.set(collection, "current_key_index", (db.get(collection, "current_key_index") + 1) % len(db.get(collection, "gemini_keys") or [gemini_key]))
+                    if retries % 2 == 0:
+                        current_key_index = (current_key_index + 1) % len(gemini_keys)
+                        db.set(collection, "current_key_index", current_key_index)
                     await asyncio.sleep(4)
                 else:
                     raise e
     except Exception as e:
-        await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
-
+        return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
+        
 @Client.on_message(filters.private & ~filters.me & ~filters.bot, group=1)
 async def handle_files(client: Client, message: Message):
+    file_path = None
     try:
         user_id, user_name = message.from_user.id, message.from_user.first_name or "User"
         if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
@@ -195,6 +215,7 @@ async def handle_files(client: Client, message: Message):
 
         roles = await fetch_roles()
         default_role = roles.get("default")
+
         if not default_role:
             await client.send_message("me", "Error: 'default' role is missing in roles.json or roles.json is unreachable.")
             return
@@ -202,16 +223,76 @@ async def handle_files(client: Client, message: Message):
         bot_role = db.get(collection, f"custom_roles.{user_id}") or default_role
         caption = message.caption.strip() if message.caption else ""
         chat_history = get_chat_history(user_id, caption, user_name)
+        chat_context = "\n".join(chat_history)
 
-        if message.photo or message.video or message.video_note or message.audio or message.voice or message.document:
-            await handle_media(client, message, user_id, chat_history, bot_role, caption)
+        if message.photo:
+            if not hasattr(client, "image_buffer"):
+                client.image_buffer = {}
+                client.image_timers = {}
+
+            if user_id not in client.image_buffer:
+                client.image_buffer[user_id] = []
+                client.image_timers[user_id] = None
+
+            image_path = await client.download_media(message.photo)
+            client.image_buffer[user_id].append(image_path)
+
+            if client.image_timers[user_id] is None:
+                async def process_images():
+                    await asyncio.sleep(5)
+                    image_paths = client.image_buffer.pop(user_id, [])
+                    client.image_timers[user_id] = None
+
+                    if not image_paths:
+                        return
+
+                    sample_images = [Image.open(img_path) for img_path in image_paths]
+                    prompt_text = "User has sent multiple images." + (f" Caption: {caption}" if caption else "")
+                    prompt = build_prompt(bot_role, chat_history, prompt_text)
+                    input_data = [prompt] + sample_images
+                    response = await generate_gemini_response(input_data, chat_history, user_id)
+                    
+                    if await handle_voice_message(client, message.chat.id, response):
+                        return
+
+                    await message.reply(response, reply_to_message_id=message.id)
+
+                client.image_timers[user_id] = asyncio.create_task(process_images())
+            return
+
+        file_type = None
+        if message.video or message.video_note:
+            file_type, file_path = "video", await client.download_media(message.video or message.video_note)
+        elif message.audio or message.voice:
+            file_type, file_path = "audio", await client.download_media(message.audio or message.voice)
+        elif message.document and message.document.file_name.endswith(".pdf"):
+            file_type, file_path = "pdf", await client.download_media(message.document)
+        elif message.document:
+            file_type, file_path = "document", await client.download_media(message.document)
+
+        if file_path and file_type:
+            uploaded_file = await upload_file_to_gemini(file_path, file_type)
+            prompt_text = f"User has sent a {file_type}." + (f" Caption: {caption}" if caption else "")
+            prompt = build_prompt(bot_role, chat_history, prompt_text)
+            input_data = [prompt, uploaded_file]
+            response = await generate_gemini_response(input_data, chat_history, user_id)
+
+            if await handle_voice_message(client, message.chat.id, response):
+                return
+
+            return await message.reply(response, reply_to_message_id=message.id)
+
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `handle_files` function:\n\n{str(e)}")
-
+    finally:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+            
 @Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
     try:
         parts = message.text.strip().split()
+
         if len(parts) < 2:
             await message.edit_text("<b>Usage:</b> gchat `on`, `off`, `del`, or `all` [user_id].")
             return
@@ -227,6 +308,7 @@ async def gchat_command(client: Client, message: Message):
                 enabled_users.append(user_id)
                 db.set(collection, "enabled_users", enabled_users)
             await message.edit_text(f"<b>ON</b> [{user_id}].")
+
         elif command == "off":
             if user_id not in disabled_users:
                 disabled_users.append(user_id)
@@ -235,18 +317,23 @@ async def gchat_command(client: Client, message: Message):
                 enabled_users.remove(user_id)
                 db.set(collection, "enabled_users", enabled_users)
             await message.edit_text(f"<b>OFF</b> [{user_id}].")
+
         elif command == "del":
             db.set(collection, f"chat_history.{user_id}", None)
             await message.edit_text(f"<b>Deleted</b> [{user_id}].")
+
         elif command == "all":
             global gchat_for_all
             gchat_for_all = not gchat_for_all
             db.set(collection, "gchat_for_all", gchat_for_all)
             await message.edit_text(f"{'enabled' if gchat_for_all else 'disabled'} for all.")
+
         else:
             await message.edit_text("<b>Usage:</b> Use `gchat on`, `off`, `del`, or `all`.")
+
         await asyncio.sleep(1)
         await message.delete()
+        
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `gchat` command:\n\n{str(e)}")
 
@@ -274,8 +361,10 @@ async def switch_role(client: Client, message: Message):
             await message.edit_text(f"Switched to: <b>{role_name}</b>")
         else:
             await message.edit_text(f"Role <b>{role_name}</b> not found! Use <code>switch</code> to see available roles.")
+
         await asyncio.sleep(1)
         await message.delete()
+
     except Exception as e:
         await client.send_message("me", f"Error in switch command:\n\n{str(e)}")
 
@@ -284,6 +373,7 @@ async def set_custom_role(client: Client, message: Message):
     try:
         roles = await fetch_roles()
         default_role = roles.get("default")
+
         if not default_role:
             await client.send_message("me", "Error: 'default' role is missing.")
             return
@@ -308,10 +398,12 @@ async def set_custom_role(client: Client, message: Message):
             db.set(collection, f"custom_roles.{user_id}", custom_role)
             db.set(collection, f"chat_history.{user_id}", None)
             await message.edit_text(f"Role set [{user_id}]!\n<b>New Role:</b> {custom_role}")
+
         await asyncio.sleep(1)
         await message.delete()
+
     except Exception as e:
-        await client.send_message("me", f"Error in `role` command:\n\n{str(e)}")
+        await client.send_message("me", f"Error in `role` command:\n\n{str(e)}")        
 
 @Client.on_message(filters.command("setgkey", prefix) & filters.me)
 async def set_gemini_key(client: Client, message: Message):
@@ -352,6 +444,7 @@ async def set_gemini_key(client: Client, message: Message):
             keys_list = "\n".join([f"{i + 1}. {key}" for i, key in enumerate(gemini_keys)])
             current_key = gemini_keys[current_key_index] if gemini_keys else "None"
             await message.edit_text(f"<b>Gemini API keys:</b>\n\n<code>{keys_list}</code>\n\n<b>Current key:</b> <code>{current_key}</code>")
+
         await asyncio.sleep(1)
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `setgkey` command:\n\n{str(e)}")
