@@ -220,6 +220,7 @@ async def handle_files(client: Client, message: Message):
     file_path = None
     try:
         user_id = message.from_user.id
+        user_name = message.from_user.first_name or "User"
         roles, bot_role, error_message = await fetch_roles_and_check_user_status(user_id)
         if error_message:
             await client.send_message("me", error_message)
@@ -229,7 +230,6 @@ async def handle_files(client: Client, message: Message):
         chat_history = get_chat_history(user_id, caption, user_name)
 
         if message.photo:
-            # Handle photo logic
             return
 
         file_type = None
