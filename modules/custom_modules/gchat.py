@@ -13,13 +13,11 @@ import datetime
 import pytz
 import requests
 
-# Initialize Gemini AI
 genai = import_library("google.generativeai", "google-generativeai")
 safety_settings = [{"category": cat, "threshold": "BLOCK_NONE"} for cat in [
     "HARM_CATEGORY_DANGEROUS_CONTENT", "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", 
     "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_UNSPECIFIED"]]
 
-# Configuration for maximum output tokens
 generation_config = {
     "max_output_tokens": 40,
 }
@@ -29,21 +27,17 @@ model.safety_settings = safety_settings
 
 collection = "custom.gchat"
 
-# Database initialization
 enabled_users = db.get(collection, "enabled_users") or []
 disabled_users = db.get(collection, "disabled_users") or []
 gchat_for_all = db.get(collection, "gchat_for_all") or False
 
-# List of random smileys
 smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
-# Set timezone to Los Angeles
 la_timezone = pytz.timezone("America/Los_Angeles")
 
 ROLES_URL = "https://gist.githubusercontent.com/iTahseen/00890d65192ca3bd9b2a62eb034b96ab/raw/roles.json"
 
 async def fetch_roles():
-    """Fetch roles from the external JSON file."""
     try:
         response = requests.get(ROLES_URL, timeout=5)
         response.raise_for_status()
@@ -139,7 +133,7 @@ async def handle_sticker(client: Client, message: Message):
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `handle_sticker` function:\n\n{str(e)}")
 
-@Client.on_message(filters.animation & filters.private & ~filters.me & ~filters.bot, group=1)  # Added this handler for GIFs (animations)
+@Client.on_message(filters.animation & filters.private & ~filters.me & ~filters.bot, group=1)
 async def handle_gif(client: Client, message: Message):
     try:
         user_id = message.from_user.id
@@ -162,7 +156,7 @@ async def gchat(client: Client, message: Message):
         default_role = roles.get("default")
 
         if not default_role:
-            await client.send_message("me", "Error: 'default' role is missing in roles.json or roles.json is unreachable.")
+            await client.send_message("me", "Error: 'default' role is missing in roles.json.")
             return
 
         bot_role = db.get(collection, f"custom_roles.{user_id}") or default_role
@@ -217,7 +211,7 @@ async def handle_files(client: Client, message: Message):
         default_role = roles.get("default")
 
         if not default_role:
-            await client.send_message("me", "Error: 'default' role is missing in roles.json or roles.json is unreachable.")
+            await client.send_message("me", "Error: 'default' role is missing in roles.json.")
             return
 
         bot_role = db.get(collection, f"custom_roles.{user_id}") or default_role
@@ -329,7 +323,7 @@ async def gchat_command(client: Client, message: Message):
             await message.edit_text(f"{'enabled' if gchat_for_all else 'disabled'} for all.")
 
         else:
-            await message.edit_text("<b>Usage:</b> Use `gchat on`, `off`, `del`, or `all`.")
+            await message.edit_text("<b>Usage:</b> `gchat on`, `off`, `del`, or `all`.")
 
         await message.delete()
         
@@ -350,7 +344,7 @@ async def switch_role(client: Client, message: Message):
 
         if len(parts) == 1:
             available_roles = "\n".join([f"- {role}" for role in roles.keys()])
-            await message.edit_text(f"<b>Available roles:</b>\n\n{available_roles}")
+            await message.edit_text(f"<b>Available roles:</b>\n{available_roles}")
             return
 
         role_name = parts[1].lower()
@@ -359,7 +353,7 @@ async def switch_role(client: Client, message: Message):
             db.set(collection, f"chat_history.{user_id}", None)
             await message.edit_text(f"Switched to: <b>{role_name}</b>")
         else:
-            await message.edit_text(f"Role <b>{role_name}</b> not found! Use <code>switch</code> to see available roles.")
+            await message.edit_text(f"Role <b>{role_name}</b> not found.")
 
         await message.delete()
 
