@@ -331,7 +331,6 @@ async def gchat_command(client: Client, message: Message):
         else:
             await message.edit_text("<b>Usage:</b> Use `gchat on`, `off`, `del`, or `all`.")
 
-        await asyncio.sleep(1)
         await message.delete()
         
     except Exception as e:
@@ -362,7 +361,6 @@ async def switch_role(client: Client, message: Message):
         else:
             await message.edit_text(f"Role <b>{role_name}</b> not found! Use <code>switch</code> to see available roles.")
 
-        await asyncio.sleep(1)
         await message.delete()
 
     except Exception as e:
@@ -399,7 +397,6 @@ async def set_custom_role(client: Client, message: Message):
             db.set(collection, f"chat_history.{user_id}", None)
             await message.edit_text(f"Role set [{user_id}]!\n<b>New Role:</b> {custom_role}")
 
-        await asyncio.sleep(1)
         await message.delete()
 
     except Exception as e:
@@ -445,7 +442,6 @@ async def set_gemini_key(client: Client, message: Message):
             current_key = gemini_keys[current_key_index] if gemini_keys else "None"
             await message.edit_text(f"<b>Gemini API keys:</b>\n\n<code>{keys_list}</code>\n\n<b>Current key:</b> <code>{current_key}</code>")
 
-        await asyncio.sleep(1)
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `setgkey` command:\n\n{str(e)}")
 
