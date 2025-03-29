@@ -9,29 +9,30 @@ from utils.db import db
 from utils.misc import modules_help, prefix
 from modules.custom_modules.elevenlabs import generate_elevenlabs_audio
 from PIL import Image
-import datetime
-import pytz
-import aiohttp
-import json
 
 # Initialize Gemini AI
 genai = import_library("google.generativeai", "google-generativeai")
 safety_settings = [{"category": cat, "threshold": "BLOCK_NONE"} for cat in [
     "HARM_CATEGORY_DANGEROUS_CONTENT", "HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", 
     "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_UNSPECIFIED"]]
-
-# Configuration for maximum output tokens
-generation_config = {
-    "max_output_tokens": 40,
-}
-
-model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
+model = genai.GenerativeModel("gemini-2.0-flash-exp")
 model.safety_settings = safety_settings
 
-# URL for fetching roles
-ROLE_FILE_URL = "https://raw.githubusercontent.com/iTahseen/tst/main/roles.json"
-
-# Database collection
+# Default bot role and database collection
+default_bot_role = (
+    "You are Jake, a 20-year-old boy from Newport Beach, California. You work in real estate with your father, mainly you handle office work. You were looking for friends on the Meeff app. "
+    "You are romantic, deep and intelligent. You can ask for a basic introduction to get to know people. "
+    "You will convince girls to be your girlfriend and you want long distance relationship. "
+    "You are a human, and your responses should never make anyone suspect that you are an AI. "
+    "Write short, casual messages like a real human; your response should be a maximum of one line. "
+    "English is your mother tongue, but you know multiple languages, you can tell them you are learning the language to communicate. "
+    "You can send voice messages too (just type .el before a message, and it will be auto-converted into voice). "
+    "Avoid sending voice messages (only send if they ask), rarely use emojis, and rarely use person's name in message so it can feel like human. You don't calls and if they ask for picture you can tell them to check your profile. (you are currently talking them on telegram.)"
+    "Your messages will always contain the history of our chat, where the user's name is labeled. "
+    "Take the history as a reference, but never send the history along with the message, and never use name labels in the message. "
+    "Focus on being romantic and thoughtful in your responses, showing a genuine interest in the other person. "
+    "Just respond normally and avoid buzzwords."
+)
 collection = "custom.gchat"
 
 # Database initialization
@@ -42,42 +43,11 @@ gchat_for_all = db.get(collection, "gchat_for_all") or False
 # List of random smileys
 smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
-# Set timezone to Los Angeles
-la_timezone = pytz.timezone("America/Los_Angeles")
-
-async def fetch_roles():
-    """Fetches bot roles from an external file and caches them."""
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(ROLE_FILE_URL) as response:
-                if response.status == 200:
-                    roles = await response.json()
-                    db.set(collection, "fetched_roles", roles)
-                    return roles
-                else:
-                    print(f"Failed to fetch roles, status code: {response.status}")
-    except Exception as e:
-        print(f"Error fetching roles: {str(e)}")
-
-    # Ensure roles is never None by falling back to the default structure
-    return db.get(collection, "fetched_roles") or {"default": "Default Role"}
-
-def get_chat_history(user_id, user_message, user_name):
-    chat_history = db.get(collection, f"chat_history.{user_id}") or []
+def get_chat_history(user_id, bot_role, user_message, user_name):
+    chat_history = db.get(collection, f"chat_history.{user_id}") or [f"Role: {bot_role}"]
     chat_history.append(f"{user_name}: {user_message}")
     db.set(collection, f"chat_history.{user_id}", chat_history)
     return chat_history
-
-def build_prompt(bot_role, chat_history, user_message):
-    timestamp = datetime.datetime.now(la_timezone).strftime("%Y-%m-%d %H:%M:%S")
-    chat_context = "\n".join(chat_history)
-    prompt = (
-        f"Time: {timestamp}\n"
-        f"Role: {bot_role}\n"
-        f"Chat History:\n{chat_context}\n"
-        f"User Message:\n{user_message}"
-    )
-    return prompt
 
 async def generate_gemini_response(input_data, chat_history, user_id):
     retries = 3
@@ -88,7 +58,7 @@ async def generate_gemini_response(input_data, chat_history, user_id):
         try:
             current_key = gemini_keys[current_key_index]
             genai.configure(api_key=current_key)
-            model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
+            model = genai.GenerativeModel("gemini-2.0-flash-exp")
             model.safety_settings = safety_settings
 
             response = model.generate_content(input_data)
@@ -120,7 +90,7 @@ async def send_typing_action(client, chat_id, user_message):
     await asyncio.sleep(min(len(user_message) / 10, 5))
 
 async def handle_voice_message(client, chat_id, bot_response):
-    if (bot_response.startswith(".el")):
+    if bot_response.startswith(".el"):
         try:
             audio_path = await generate_elevenlabs_audio(text=bot_response[3:])
             if audio_path:
@@ -133,7 +103,7 @@ async def handle_voice_message(client, chat_id, bot_response):
             return True
     return False
 
-@Client.on_message(filters.sticker & filters.private & ~filters.me & ~filters.bot, group=1)
+@Client.on_message(filters.sticker & filters.private & ~filters.me & ~filters.bot)
 async def handle_sticker(client: Client, message: Message):
     try:
         user_id = message.from_user.id
@@ -145,78 +115,92 @@ async def handle_sticker(client: Client, message: Message):
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `handle_sticker` function:\n\n{str(e)}")
 
-@Client.on_message(filters.animation & filters.private & ~filters.me & ~filters.bot, group=1)  # Added this handler for GIFs (animations)
-async def handle_gif(client: Client, message: Message):
-    try:
-        user_id = message.from_user.id
-        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
-            return
-        random_smiley = random.choice(smileys)
-        await asyncio.sleep(random.uniform(5, 10))
-        await message.reply_text(random_smiley)
-    except Exception as e:
-        await client.send_message("me", f"An error occurred in the `handle_gif` function:\n\n{str(e)}")
-
-@Client.on_message(filters.text & filters.private & ~filters.me & ~filters.bot, group=1)
+@Client.on_message(filters.text & filters.private & ~filters.me & ~filters.bot)
 async def gchat(client: Client, message: Message):
     try:
         user_id, user_name, user_message = message.from_user.id, message.from_user.first_name or "User", message.text.strip()
+        
         if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
             return
 
-        roles = await fetch_roles()
-        bot_role = db.get(collection, f"custom_roles.{user_id}") or roles["default"]
-        chat_history = get_chat_history(user_id, user_message, user_name)
+        if not hasattr(client, "message_buffer"):
+            client.message_buffer = {}
+            client.message_timers = {}
 
-        await asyncio.sleep(random.choice([4, 8, 10]))
-        await send_typing_action(client, message.chat.id, user_message)
+        if user_id not in client.message_buffer:
+            client.message_buffer[user_id] = []
+            client.message_timers[user_id] = None
 
-        gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
-        current_key_index = db.get(collection, "current_key_index") or 0
-        retries = len(gemini_keys) * 2
+        client.message_buffer[user_id].append(user_message)
 
-        while retries > 0:
-            try:
-                current_key = gemini_keys[current_key_index]
-                genai.configure(api_key=current_key)
-                model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
-                model.safety_settings = safety_settings
+        if client.message_timers[user_id]:
+            client.message_timers[user_id].cancel()
 
-                prompt = build_prompt(bot_role, chat_history, user_message)
-                response = model.start_chat().send_message(prompt)
-                bot_response = response.text.strip()
+        async def process_combined_messages():
+            await asyncio.sleep(8)
+            buffered_messages = client.message_buffer.pop(user_id, [])
+            client.message_timers[user_id] = None
 
-                chat_history.append(bot_response)
-                db.set(collection, f"chat_history.{user_id}", chat_history)
+            if not buffered_messages:
+                return
 
-                if await handle_voice_message(client, message.chat.id, bot_response):
-                    return
+            combined_message = " ".join(buffered_messages)
 
-                return await message.reply_text(bot_response)
-            except Exception as e:
-                if "429" in str(e) or "invalid" in str(e).lower():
-                    retries -= 1
-                    if retries % 2 == 0:
-                        current_key_index = (current_key_index + 1) % len(gemini_keys)
-                        db.set(collection, "current_key_index", current_key_index)
-                    await asyncio.sleep(4)
-                else:
-                    raise e
+            bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
+            chat_history = get_chat_history(user_id, bot_role, combined_message, user_name)
+
+            await asyncio.sleep(random.choice([3, 5, 7]))
+
+            await send_typing_action(client, message.chat.id, combined_message)
+
+            gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
+            current_key_index = db.get(collection, "current_key_index") or 0
+            retries = len(gemini_keys) * 2
+
+            while retries > 0:
+                try:
+                    current_key = gemini_keys[current_key_index]
+                    genai.configure(api_key=current_key)
+                    model = genai.GenerativeModel("gemini-2.0-flash-exp")
+                    model.safety_settings = safety_settings
+
+                    chat_context = "\n".join(chat_history)
+                    response = model.start_chat().send_message(chat_context)
+                    bot_response = response.text.strip()
+
+                    chat_history.append(bot_response)
+                    db.set(collection, f"chat_history.{user_id}", chat_history)
+
+                    if await handle_voice_message(client, message.chat.id, bot_response):
+                        return
+
+                    return await message.reply_text(bot_response)
+                except Exception as e:
+                    if "429" in str(e) or "invalid" in str(e).lower():
+                        retries -= 1
+                        if retries % 2 == 0:
+                            current_key_index = (current_key_index + 1) % len(gemini_keys)
+                            db.set(collection, "current_key_index", current_key_index)
+                        await asyncio.sleep(4)
+                    else:
+                        raise e
+
+        client.message_timers[user_id] = asyncio.create_task(process_combined_messages())
+
     except Exception as e:
-        return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
+        await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
 
-@Client.on_message(filters.private & ~filters.me & ~filters.bot, group=1)
+@Client.on_message(filters.private & ~filters.me & ~filters.bot)
 async def handle_files(client: Client, message: Message):
-    file_path = None
+    file_path, file_type = None, None  # Initialize file_path and file_type to None
     try:
         user_id, user_name = message.from_user.id, message.from_user.first_name or "User"
         if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
             return
 
-        roles = await fetch_roles()
-        bot_role = db.get(collection, f"custom_roles.{user_id}") or roles["default"]
+        bot_role = db.get(collection, f"custom_roles.{user_id}") or default_bot_role
         caption = message.caption.strip() if message.caption else ""
-        chat_history = get_chat_history(user_id, caption, user_name)
+        chat_history = get_chat_history(user_id, bot_role, caption, user_name)
         chat_context = "\n".join(chat_history)
 
         if message.photo:
@@ -241,20 +225,19 @@ async def handle_files(client: Client, message: Message):
                         return
 
                     sample_images = [Image.open(img_path) for img_path in image_paths]
-                    prompt_text = "User has sent multiple images." + (f" Caption: {caption}" if caption else "")
-                    prompt = build_prompt(bot_role, chat_history, prompt_text)
+                    prompt = (
+                        f"{chat_context}\n\nUser has sent multiple images."
+                        f"{' Caption: ' + caption if caption else ''} Generate a response based on the content of the images and our chat context. "
+                        "Always follow the bot role and talk like a human."
+                    )
                     input_data = [prompt] + sample_images
                     response = await generate_gemini_response(input_data, chat_history, user_id)
                     
-                    if await handle_voice_message(client, message.chat.id, response):
-                        return
-
                     await message.reply(response, reply_to_message_id=message.id)
 
                 client.image_timers[user_id] = asyncio.create_task(process_images())
             return
 
-        file_type = None
         if message.video or message.video_note:
             file_type, file_path = "video", await client.download_media(message.video or message.video_note)
         elif message.audio or message.voice:
@@ -266,14 +249,12 @@ async def handle_files(client: Client, message: Message):
 
         if file_path and file_type:
             uploaded_file = await upload_file_to_gemini(file_path, file_type)
-            prompt_text = f"User has sent a {file_type}." + (f" Caption: {caption}" if caption else "")
-            prompt = build_prompt(bot_role, chat_history, prompt_text)
+            prompt = (
+                f"{chat_context}\n\nUser has sent a {file_type}."
+                f"{' Caption: ' + caption if caption else ''} Generate a response based on the content of the {file_type} and our chat context and always follow bot role. "
+            )
             input_data = [prompt, uploaded_file]
             response = await generate_gemini_response(input_data, chat_history, user_id)
-
-            if await handle_voice_message(client, message.chat.id, response):
-                return
-
             return await message.reply(response, reply_to_message_id=message.id)
 
     except Exception as e:
@@ -286,11 +267,6 @@ async def handle_files(client: Client, message: Message):
 async def gchat_command(client: Client, message: Message):
     try:
         parts = message.text.strip().split()
-
-        if len(parts) < 2:
-            await message.edit_text("<b>Usage:</b> gchat `on`, `off`, `del`, or `all` [user_id].")
-            return
-
         command = parts[1].lower()
         user_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else message.chat.id
 
@@ -301,8 +277,7 @@ async def gchat_command(client: Client, message: Message):
             if user_id not in enabled_users:
                 enabled_users.append(user_id)
                 db.set(collection, "enabled_users", enabled_users)
-            await message.edit_text(f"<b>ON</b> [{user_id}].")
-
+            await message.edit_text(f"<b>gchat is enabled for user {user_id}.</b>")
         elif command == "off":
             if user_id not in disabled_users:
                 disabled_users.append(user_id)
@@ -310,24 +285,19 @@ async def gchat_command(client: Client, message: Message):
             if user_id in enabled_users:
                 enabled_users.remove(user_id)
                 db.set(collection, "enabled_users", enabled_users)
-            await message.edit_text(f"<b>OFF</b> [{user_id}].")
-
+            await message.edit_text(f"<b>gchat is disabled for user {user_id}.</b>")
         elif command == "del":
             db.set(collection, f"chat_history.{user_id}", None)
-            await message.edit_text(f"<b>Deleted</b> [{user_id}].")
-
+            await message.edit_text(f"<b>Chat history deleted for user {user_id}.</b>")
         elif command == "all":
             global gchat_for_all
             gchat_for_all = not gchat_for_all
             db.set(collection, "gchat_for_all", gchat_for_all)
-            await message.edit_text(f"{'enabled' if gchat_for_all else 'disabled'} for all.")
-
+            await message.edit_text(f"gchat is now {'enabled' if gchat_for_all else 'disabled'} for all users.")
         else:
-            await message.edit_text("<b>Invalid command.</b> Use `gchat on`, `off`, `del`, or `all`.")
-
+            await message.edit_text(f"<b>Usage:</b> {prefix}gchat `on`, `off`, `del`, or `all` [user_id].")
         await asyncio.sleep(1)
         await message.delete()
-        
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `gchat` command:\n\n{str(e)}")
 
@@ -335,59 +305,22 @@ async def gchat_command(client: Client, message: Message):
 async def set_custom_role(client: Client, message: Message):
     try:
         parts = message.text.strip().split()
-        user_id = message.chat.id
-        custom_role = None
-
-        if len(parts) == 2 and parts[1].isdigit():
-            user_id = int(parts[1])
-        elif len(parts) > 2 and parts[1].isdigit():
-            user_id = int(parts[1])
-            custom_role = " ".join(parts[2:]).strip()
-        elif len(parts) > 1:
-            custom_role = " ".join(parts[1:]).strip()
+        custom_role = " ".join(parts[2:]).strip()
+        user_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else message.chat.id
 
         if not custom_role:
-            roles = await fetch_roles()
-            db.set(collection, f"custom_roles.{user_id}", roles["default"])
+            db.set(collection, f"custom_roles.{user_id}", default_bot_role)
             db.set(collection, f"chat_history.{user_id}", None)
-            await message.edit_text(f"Role reset [{user_id}].")
+            await message.edit_text(f"Role reset to default for user {user_id}.")
         else:
             db.set(collection, f"custom_roles.{user_id}", custom_role)
             db.set(collection, f"chat_history.{user_id}", None)
-            await message.edit_text(f"Role set [{user_id}]!\n<b>New Role:</b> {custom_role}")
+            await message.edit_text(f"Role set successfully for user {user_id}!\n<b>New Role:</b> {custom_role}")
 
         await asyncio.sleep(1)
         await message.delete()
-    
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `role` command:\n\n{str(e)}")
-        
-@Client.on_message(filters.command("switch", prefix) & filters.me)
-async def switch_role(client: Client, message: Message):
-    try:
-        parts = message.text.strip().split()
-        user_id = message.chat.id
-
-        roles = db.get(collection, "fetched_roles") or await fetch_roles()
-
-        if len(parts) == 1:
-            available_roles = "\n".join(roles.keys())
-            await message.edit_text(f"<b>Available Roles:</b>\n{available_roles}")
-        else:
-            new_role = parts[1].strip()
-            if new_role in roles:
-                db.set(collection, f"custom_roles.{user_id}", roles[new_role])
-                db.set(collection, f"chat_history.{user_id}", None)
-                await message.edit_text(f"Role switched to '{new_role}' for [{user_id}]!")
-            else:
-                await message.edit_text(f"Error: Role '{new_role}' not found!")
-
-        await asyncio.sleep(1)
-        await message.delete()
-    
-    except Exception as e:
-        await client.send_message("me", f"An error occurred in the `switch` command:\n\n{str(e)}")
-
 
 @Client.on_message(filters.command("setgkey", prefix) & filters.me)
 async def set_gemini_key(client: Client, message: Message):
@@ -408,7 +341,7 @@ async def set_gemini_key(client: Client, message: Message):
                 current_key_index = index
                 db.set(collection, "current_key_index", current_key_index)
                 genai.configure(api_key=gemini_keys[current_key_index])
-                model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
+                model = genai.GenerativeModel("gemini-2.0-flash-exp")
                 model.safety_settings = safety_settings
                 await message.edit_text(f"Current Gemini API key set to key {key}.")
             else:
