@@ -121,21 +121,50 @@ async def handle_voice_message(client, chat_id, bot_response):
             return True
     return False
 
-async def fetch_roles_and_check_user_status(user_id):
-    roles = await fetch_roles()
-    default_role = roles.get("default")
-    if not default_role:
-        return None, None, "Error: 'default' role is missing in roles.json."
-    if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
-        return None, None, None
-    bot_role = db.get(collection, f"custom_roles.{user_id}") or default_role
-    return roles, bot_role, None
-
-async def handle_exception(client, function_name, e):
-    await client.send_message("me", f"An error occurred in the `{function_name}` function:\n\n{str(e)}")
-
-async def generate_and_handle_response(client, message, bot_role, chat_history, user_message, user_id):
+@Client.on_message(filters.sticker & filters.private & ~filters.me & ~filters.bot, group=1)
+async def handle_sticker(client: Client, message: Message):
     try:
+        user_id = message.from_user.id
+        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
+            return
+        random_smiley = random.choice(smileys)
+        await asyncio.sleep(random.uniform(5, 10))
+        await message.reply_text(random_smiley)
+    except Exception as e:
+        await client.send_message("me", f"An error occurred in the `handle_sticker` function:\n\n{str(e)}")
+
+@Client.on_message(filters.animation & filters.private & ~filters.me & ~filters.bot, group=1)
+async def handle_gif(client: Client, message: Message):
+    try:
+        user_id = message.from_user.id
+        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
+            return
+        random_smiley = random.choice(smileys)
+        await asyncio.sleep(random.uniform(5, 10))
+        await message.reply_text(random_smiley)
+    except Exception as e:
+        await client.send_message("me", f"An error occurred in the `handle_gif` function:\n\n{str(e)}")
+
+@Client.on_message(filters.text & filters.private & ~filters.me & ~filters.bot, group=1)
+async def gchat(client: Client, message: Message):
+    try:
+        user_id, user_name, user_message = message.from_user.id, message.from_user.first_name or "User", message.text.strip()
+        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
+            return
+
+        roles = await fetch_roles()
+        default_role = roles.get("default")
+
+        if not default_role:
+            await client.send_message("me", "Error: 'default' role is missing in roles.json.")
+            return
+
+        bot_role = db.get(collection, f"custom_roles.{user_id}") or default_role
+        chat_history = get_chat_history(user_id, user_message, user_name)
+
+        await asyncio.sleep(random.choice([4, 8, 10]))
+        await send_typing_action(client, message.chat.id, user_message)
+
         gemini_keys = db.get(collection, "gemini_keys") or [gemini_key]
         current_key_index = db.get(collection, "current_key_index") or 0
         retries = len(gemini_keys) * 2
@@ -168,68 +197,61 @@ async def generate_and_handle_response(client, message, bot_role, chat_history, 
                 else:
                     raise e
     except Exception as e:
-        await handle_exception(client, "generate_and_handle_response", e)
-
-@Client.on_message(filters.sticker & filters.private & ~filters.me & ~filters.bot, group=1)
-async def handle_sticker(client: Client, message: Message):
-    try:
-        user_id = message.from_user.id
-        _, _, error_message = await fetch_roles_and_check_user_status(user_id)
-        if error_message:
-            await client.send_message("me", error_message)
-            return
-        random_smiley = random.choice(smileys)
-        await asyncio.sleep(random.uniform(5, 10))
-        await message.reply_text(random_smiley)
-    except Exception as e:
-        await handle_exception(client, "handle_sticker", e)
-
-@Client.on_message(filters.animation & filters.private & ~filters.me & ~filters.bot, group=1)
-async def handle_gif(client: Client, message: Message):
-    try:
-        user_id = message.from_user.id
-        _, _, error_message = await fetch_roles_and_check_user_status(user_id)
-        if error_message:
-            await client.send_message("me", error_message)
-            return
-        random_smiley = random.choice(smileys)
-        await asyncio.sleep(random.uniform(5, 10))
-        await message.reply_text(random_smiley)
-    except Exception as e:
-        await handle_exception(client, "handle_gif", e)
-
-@Client.on_message(filters.text & filters.private & ~filters.me & ~filters.bot, group=1)
-async def gchat(client: Client, message: Message):
-    try:
-        user_id, user_name, user_message = message.from_user.id, message.from_user.first_name or "User", message.text.strip()
-        roles, bot_role, error_message = await fetch_roles_and_check_user_status(user_id)
-        if error_message:
-            await client.send_message("me", error_message)
-            return
-
-        chat_history = get_chat_history(user_id, user_message, user_name)
-        await asyncio.sleep(random.choice([4, 8, 10]))
-        await send_typing_action(client, message.chat.id, user_message)
-
-        await generate_and_handle_response(client, message, bot_role, chat_history, user_message, user_id)
-    except Exception as e:
-        await handle_exception(client, "gchat", e)
-
+        return await client.send_message("me", f"An error occurred in the `gchat` module:\n\n{str(e)}")
+        
 @Client.on_message(filters.private & ~filters.me & ~filters.bot, group=1)
 async def handle_files(client: Client, message: Message):
     file_path = None
     try:
-        user_id = message.from_user.id
-        user_name = message.from_user.first_name or "User"
-        roles, bot_role, error_message = await fetch_roles_and_check_user_status(user_id)
-        if error_message:
-            await client.send_message("me", error_message)
+        user_id, user_name = message.from_user.id, message.from_user.first_name or "User"
+        if user_id in disabled_users or (not gchat_for_all and user_id not in enabled_users):
             return
 
+        roles = await fetch_roles()
+        default_role = roles.get("default")
+
+        if not default_role:
+            await client.send_message("me", "Error: 'default' role is missing in roles.json.")
+            return
+
+        bot_role = db.get(collection, f"custom_roles.{user_id}") or default_role
         caption = message.caption.strip() if message.caption else ""
         chat_history = get_chat_history(user_id, caption, user_name)
+        chat_context = "\n".join(chat_history)
 
         if message.photo:
+            if not hasattr(client, "image_buffer"):
+                client.image_buffer = {}
+                client.image_timers = {}
+
+            if user_id not in client.image_buffer:
+                client.image_buffer[user_id] = []
+                client.image_timers[user_id] = None
+
+            image_path = await client.download_media(message.photo)
+            client.image_buffer[user_id].append(image_path)
+
+            if client.image_timers[user_id] is None:
+                async def process_images():
+                    await asyncio.sleep(5)
+                    image_paths = client.image_buffer.pop(user_id, [])
+                    client.image_timers[user_id] = None
+
+                    if not image_paths:
+                        return
+
+                    sample_images = [Image.open(img_path) for img_path in image_paths]
+                    prompt_text = "User has sent multiple images." + (f" Caption: {caption}" if caption else "")
+                    prompt = build_prompt(bot_role, chat_history, prompt_text)
+                    input_data = [prompt] + sample_images
+                    response = await generate_gemini_response(input_data, chat_history, user_id)
+                    
+                    if await handle_voice_message(client, message.chat.id, response):
+                        return
+
+                    await message.reply(response, reply_to_message_id=message.id)
+
+                client.image_timers[user_id] = asyncio.create_task(process_images())
             return
 
         file_type = None
@@ -255,11 +277,11 @@ async def handle_files(client: Client, message: Message):
             return await message.reply(response, reply_to_message_id=message.id)
 
     except Exception as e:
-        await handle_exception(client, "handle_files", e)
+        await client.send_message("me", f"An error occurred in the `handle_files` function:\n\n{str(e)}")
     finally:
         if file_path and os.path.exists(file_path):
             os.remove(file_path)
-
+            
 @Client.on_message(filters.command(["gchat", "gc"], prefix) & filters.me)
 async def gchat_command(client: Client, message: Message):
     try:
@@ -304,9 +326,9 @@ async def gchat_command(client: Client, message: Message):
             await message.edit_text("<b>Usage:</b> `gchat on`, `off`, `del`, or `all`.")
 
         await message.delete()
-
+        
     except Exception as e:
-        await handle_exception(client, "gchat_command", e)
+        await client.send_message("me", f"An error occurred in the `gchat` command:\n\n{str(e)}")
 
 @Client.on_message(filters.command("gswitch", prefix) & filters.me)
 async def switch_role(client: Client, message: Message):
@@ -322,7 +344,7 @@ async def switch_role(client: Client, message: Message):
 
         if len(parts) == 1:
             available_roles = "\n".join([f"- {role}" for role in roles.keys()])
-            await message.edit_text(f"<b>Available roles:</b>\n{available_roles}")
+            await message.edit_text(f"<b>Available roles:</b>\n\n{available_roles}")
             return
 
         role_name = parts[1].lower()
@@ -336,7 +358,7 @@ async def switch_role(client: Client, message: Message):
         await message.delete()
 
     except Exception as e:
-        await handle_exception(client, "switch_role", e)
+        await client.send_message("me", f"Error in switch command:\n\n{str(e)}")
 
 @Client.on_message(filters.command("role", prefix) & filters.me)
 async def set_custom_role(client: Client, message: Message):
@@ -372,7 +394,7 @@ async def set_custom_role(client: Client, message: Message):
         await message.delete()
 
     except Exception as e:
-        await handle_exception(client, "set_custom_role", e)
+        await client.send_message("me", f"Error in `role` command:\n\n{str(e)}")        
 
 @Client.on_message(filters.command("setgkey", prefix) & filters.me)
 async def set_gemini_key(client: Client, message: Message):
@@ -415,16 +437,17 @@ async def set_gemini_key(client: Client, message: Message):
             await message.edit_text(f"<b>Gemini API keys:</b>\n\n<code>{keys_list}</code>\n\n<b>Current key:</b> <code>{current_key}</code>")
 
     except Exception as e:
-        await handle_exception(client, "set_gemini_key", e)
+        await client.send_message("me", f"An error occurred in the `setgkey` command:\n\n{str(e)}")
 
 modules_help["gchat"] = {
-    "gchat on [user_id]": "Enable gchat for the specified user or current user in the chat.",
-    "gchat off [user_id]": "Disable gchat for the specified user or current user in the chat.",
-    "gchat del [user_id]": "Delete the chat history for the specified user or current user.",
-    "gchat all": "Toggle gchat for all users globally.",
-    "role [user_id] <custom role>": "Set a custom role for the bot for the specified user or current user and clear existing chat history.",
-    "setgkey add <key>": "Add a new Gemini API key.",
-    "setgkey set <index>": "Set the current Gemini API key by index.",
-    "setgkey del <index>": "Delete a Gemini API key by index.",
-    "setgkey": "Display all available Gemini API keys and the current key."
+    "gchat on [user_id]": "Enable gchat for the user.",
+    "gchat off [user_id]": "Disable gchat for the user.",
+    "gchat del [user_id]": "Delete chat history for the user.",
+    "gchat all": "Toggle gchat for all users.",
+    "role [user_id] <custom role>": "Set a custom role for the user.",
+    "switch": "Switch gchat modes.",
+    "setgkey add <key>": "Add a Gemini API key.",
+    "setgkey set <index>": "Set the Gemini API key.",
+    "setgkey del <index>": "Delete a Gemini API key.",
+    "setgkey": "Show all Gemini API keys."
 }
