@@ -25,7 +25,7 @@ from utils.misc import modules_help, prefix
 from utils.scripts import with_reply, format_exc, resize_image
 
 
-@Client.on_message(filters.command(["q", "quote"], prefix) & filters.me)
+@Client.on_message(filters.command(["q", "quote"], prefix))
 @with_reply
 async def quote_cmd(client: Client, message: Message):
     if len(message.command) > 1 and message.command[1].isdigit():
@@ -86,19 +86,28 @@ async def quote_cmd(client: Client, message: Message):
     resized = resize_image(
         BytesIO(response.content), img_type="PNG" if is_png else "WEBP"
     )
-    await message.edit("<b>Sending...</b>")
+
+    # For the bot itself, edit the message; for others, send a new message
+    if message.from_user.is_self:
+        await message.edit("<b>Sending...</b>")
+    else:
+        await client.send_message(message.chat.id, "<b>Sending...</b>")
 
     try:
         func = client.send_document if is_png else client.send_sticker
         chat_id = "me" if send_for_me else message.chat.id
         await func(chat_id, resized)
     except errors.RPCError as e:  # no rights to send stickers, etc
-        await message.edit(format_exc(e))
+        if message.from_user.is_self:
+            await message.edit(format_exc(e))
+        else:
+            await client.send_message(message.chat.id, format_exc(e))
     else:
-        await message.delete()
+        if message.from_user.is_self:
+            await message.delete()
 
 
-@Client.on_message(filters.command(["fq", "fakequote"], prefix) & filters.me)
+@Client.on_message(filters.command(["fq", "fakequote"], prefix))
 @with_reply
 async def fake_quote_cmd(client: Client, message: types.Message):
     is_png = "!png" in message.command or "!file" in message.command
@@ -144,16 +153,24 @@ async def fake_quote_cmd(client: Client, message: types.Message):
     resized = resize_image(
         BytesIO(response.content), img_type="PNG" if is_png else "WEBP"
     )
-    await message.edit("<b>Sending...</b>")
+
+    if message.from_user.is_self:
+        await message.edit("<b>Sending...</b>")
+    else:
+        await client.send_message(message.chat.id, "<b>Sending...</b>")
 
     try:
         func = client.send_document if is_png else client.send_sticker
         chat_id = "me" if send_for_me else message.chat.id
         await func(chat_id, resized)
     except errors.RPCError as e:  # no rights to send stickers, etc
-        await message.edit(format_exc(e))
+        if message.from_user.is_self:
+            await message.edit(format_exc(e))
+        else:
+            await client.send_message(message.chat.id, format_exc(e))
     else:
-        await message.delete()
+        if message.from_user.is_self:
+            await message.delete()
 
 
 files_cache = {}
