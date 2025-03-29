@@ -53,7 +53,7 @@ async def quote_cmd(client: Client, message: Message):
         if message.from_user.is_self:
             await message.edit("<b>Generating...</b>")
         else:
-            await client.send_message(message.chat.id, "<b>Generating...</b>")
+            message = await client.send_message(message.chat.id, "<b>Generating...</b>")
 
     url = "https://quotes.fl1yd.su/generate"
     params = {
@@ -74,24 +74,17 @@ async def quote_cmd(client: Client, message: Message):
         BytesIO(response.content), img_type="PNG" if is_png else "WEBP"
     )
 
-    # For the bot itself, edit the message; for others, send a new message
-    if message.from_user.is_self:
-        await message.edit("<b>Sending...</b>")
-    else:
-        await client.send_message(message.chat.id, "<b>Sending...</b>")
+    # Edit the message to show "Sending..."
+    await message.edit("<b>Sending...</b>")
 
     try:
         func = client.send_document if is_png else client.send_sticker
         chat_id = "me" if send_for_me else message.chat.id
         await func(chat_id, resized)
     except errors.RPCError as e:  # no rights to send stickers, etc
-        if message.from_user.is_self:
-            await message.edit(format_exc(e))
-        else:
-            await client.send_message(message.chat.id, format_exc(e))
+        await message.edit(format_exc(e))
     else:
-        if message.from_user.is_self:
-            await message.delete()
+        await message.delete()
 
 
 @Client.on_message(filters.command(["fq", "fakequote"], prefix))
@@ -125,7 +118,7 @@ async def fake_quote_cmd(client: Client, message: types.Message):
         if message.from_user.is_self:
             await message.edit("<b>Generating...</b>")
         else:
-            await client.send_message(message.chat.id, "<b>Generating...</b>")
+            message = await client.send_message(message.chat.id, "<b>Generating...</b>")
 
     url = "https://quotes.fl1yd.su/generate"
     params = {
@@ -144,23 +137,17 @@ async def fake_quote_cmd(client: Client, message: types.Message):
         BytesIO(response.content), img_type="PNG" if is_png else "WEBP"
     )
 
-    if message.from_user.is_self:
-        await message.edit("<b>Sending...</b>")
-    else:
-        await client.send_message(message.chat.id, "<b>Sending...</b>")
+    # Edit the message to show "Sending..."
+    await message.edit("<b>Sending...</b>")
 
     try:
         func = client.send_document if is_png else client.send_sticker
         chat_id = "me" if send_for_me else message.chat.id
         await func(chat_id, resized)
     except errors.RPCError as e:  # no rights to send stickers, etc
-        if message.from_user.is_self:
-            await message.edit(format_exc(e))
-        else:
-            await client.send_message(message.chat.id, format_exc(e))
+        await message.edit(format_exc(e))
     else:
-        if message.from_user.is_self:
-            await message.delete()
+        await message.delete()
 
 
 files_cache = {}
@@ -457,7 +444,7 @@ def get_poll_text(poll: types.Poll) -> str:
     text += poll.question + "\n"
     for option in poll.options:
         text += f"- {option.text}"
-        if option.voter_count > 0:
+        if option.voter_count > 0
             text += f" ({option.voter_count} voted)"
         text += "\n"
 
@@ -471,7 +458,7 @@ def get_reply_poll_text(poll: types.Poll) -> str:
         text = "📊 Anonymous poll" if poll.type == "regular" else "📊 Anonymous quiz"
     else:
         text = "📊 Poll" if poll.type == "regular" else "📊 Quiz"
-    if poll.is_closed:
+    if poll is closed:
         text += " (closed)"
 
     return text
@@ -479,7 +466,7 @@ def get_reply_poll_text(poll: types.Poll) -> str:
 
 def get_full_name(user: types.User) -> str:
     name = user.first_name
-    if user.last_name:
+    if user last_name:
         name += " " + user.last_name
     return name
 
