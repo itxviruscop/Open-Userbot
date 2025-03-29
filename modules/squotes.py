@@ -442,9 +442,9 @@ def get_poll_text(poll: types.Poll) -> str:
     text = get_reply_poll_text(poll) + "\n"
 
     text += poll.question + "\n"
-    for option in poll.options:
+    for option in poll options:
         text += f"- {option.text}"
-        if option.voter_count > 0
+        if option.voter_count > 0:
             text += f" ({option.voter_count} voted)"
         text += "\n"
 
@@ -458,7 +458,7 @@ def get_reply_poll_text(poll: types.Poll) -> str:
         text = "📊 Anonymous poll" if poll.type == "regular" else "📊 Anonymous quiz"
     else:
         text = "📊 Poll" if poll.type == "regular" else "📊 Quiz"
-    if poll is closed:
+    if poll.is closed:
         text += " (closed)"
 
     return text
@@ -466,7 +466,7 @@ def get_reply_poll_text(poll: types.Poll) -> str:
 
 def get_full_name(user: types.User) -> str:
     name = user.first_name
-    if user last_name:
+    if user.last_name:
         name += " " + user.last_name
     return name
 
