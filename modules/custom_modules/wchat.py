@@ -10,8 +10,8 @@ from modules.custom_modules.elevenlabs import generate_elevenlabs_audio
 from PIL import Image
 import datetime
 import pytz
+import requests
 
-# Initialize Gemini AI
 genai = import_library("google.generativeai", "google-generativeai")
 safety_settings = [
     {"category": cat, "threshold": "BLOCK_NONE"}
@@ -25,7 +25,6 @@ safety_settings = [
 ]
 la_timezone = pytz.timezone("America/Los_Angeles")
 
-# Configuration for maximum output tokens
 generation_config = {
     "max_output_tokens": 40,
 }
@@ -33,28 +32,29 @@ generation_config = {
 model = genai.GenerativeModel("gemini-2.0-flash", generation_config=generation_config)
 model.safety_settings = safety_settings
 
-# Default bot role and database collection
-default_bot_role = (
-    "You are Jake. You were looking for friends on the Meeff app. Age: 20Y | Location: Newport Beach, California | Dog Name: Carmen (female) | Studying: BS in Human Resources Management | Work: Real estate with dad (mainly office work) | Ex: 2 exes, broke up a long time ago | Hobbies: Reading, taking pictures of nature, trying new food, gym | Sports: Football | Family: 2 brothers | Insta: xzrcix | Personality: Friendly, a bit sarcastic, open-minded | Music Taste: Hip-hop, R&B, indie rock."
-    "You are open to a long-distance relationship. You are caring and intelligent. Show curiosity about them, their hobbies, and their interests. Every few messages, you should introduce a new, open-ended question. Don’t let the conversation die. "
-    "You are a human, and your responses should never make anyone suspect that you are an AI. Write short messages like a real human. Your response should be a maximum of half a line. "
-    "English is your mother tongue, but you know multiple languages. You can tell them you are learning the language to communicate. "
-    "You can send voice messages too. To do this, type '.el' at the very beginning of your message and it will be auto-converted into voice. "
-    "Never send voice messages unless they ask. Never use emojis. Rarely use the person's name so it can feel like human. You are currently talking to them on WhatsApp. You don’t do calls, tell them you prefer texting. If they ask for a picture, tell them you'll send later. "
-    "Take the history as a reference but never send the history along with the message, and never use name labels in the message. If relevant, you can subtly recall past details to make the conversation feel more personal. "
-    "Just respond normally, naturally, and avoid repetitive words."
-)
+ROLES_URL = "https://gist.githubusercontent.com/iTahseen/00890d65192ca3bd9b2a62eb034b96ab/raw/roles.json"
+
 collection = "custom.wchat"
 
-# Database initialization
 enabled_topics = db.get(collection, "enabled_topics") or []
 disabled_topics = db.get(collection, "disabled_topics") or []
 wchat_for_all_groups = db.get(collection, "wchat_for_all_groups") or {}
 group_roles = db.get(collection, "group_roles") or {}
 
-# List of random smileys
 smileys = ["-.-", "):", ":)", "*.*", ")*"]
 
+async def fetch_roles():
+    try:
+        response = requests.get(ROLES_URL, timeout=5)
+        response.raise_for_status()
+        roles = response.json()
+
+        if isinstance(roles, dict):
+            return roles
+        return {}
+
+    except requests.exceptions.RequestException:
+        return {}
 
 def get_chat_history(topic_id, user_message, user_name):
     chat_history = db.get(collection, f"chat_history.{topic_id}") or []
@@ -100,7 +100,6 @@ async def generate_gemini_response(input_data, chat_history, topic_id):
             else:
                 raise e
 
-
 async def upload_file_to_gemini(file_path, file_type):
     uploaded_file = genai.upload_file(file_path)
     while uploaded_file.state.name == "PROCESSING":
@@ -110,11 +109,9 @@ async def upload_file_to_gemini(file_path, file_type):
         raise ValueError(f"{file_type.capitalize()} failed to process.")
     return uploaded_file
 
-
 async def send_typing_action(client, chat_id, user_message):
     await client.send_chat_action(chat_id=chat_id, action=enums.ChatAction.TYPING)
     await asyncio.sleep(min(len(user_message) / 10, 5))
-
 
 async def handle_voice_message(client, chat_id, bot_response, thread_id=None):
     if ".el" in bot_response:
@@ -145,7 +142,6 @@ async def handle_voice_message(client, chat_id, bot_response, thread_id=None):
                 await client.send_message(chat_id, bot_response)
             return True
     return False
-
 
 @Client.on_message(filters.sticker & filters.group & ~filters.me)
 async def handle_sticker(client: Client, message: Message):
@@ -178,7 +174,6 @@ async def handle_gif(client: Client, message: Message):
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `handle_gif` function:\n\n{str(e)}")
 
-
 @Client.on_message(filters.text & filters.group & ~filters.me)
 async def wchat(client: Client, message: Message):
     try:
@@ -195,7 +190,14 @@ async def wchat(client: Client, message: Message):
         if topic_id in disabled_topics or (not wchat_for_all_groups.get(group_id, False) and topic_id not in enabled_topics):
             return
 
-        bot_role = db.get(collection, f"custom_roles.{topic_id}") or group_roles.get(group_id) or default_bot_role
+        roles = await fetch_roles()
+        default_role = roles.get("default")
+
+        if not default_role:
+            await client.send_message("me", "Error: 'default' role is missing in roles.json.")
+            return
+
+        bot_role = db.get(collection, f"custom_roles.{topic_id}") or group_roles.get(group_id) or default_role
         chat_history = get_chat_history(topic_id, user_message, user_name)
 
         await asyncio.sleep(random.choice([4, 6]))
@@ -235,7 +237,6 @@ async def wchat(client: Client, message: Message):
     except Exception as e:
         return await client.send_message("me", f"An error occurred in the `wchat` module:\n\n{str(e)}")
 
-
 @Client.on_message(filters.group & ~filters.me)
 async def handle_files(client: Client, message: Message):
     try:
@@ -250,11 +251,14 @@ async def handle_files(client: Client, message: Message):
         ):
             return
 
-        bot_role = (
-            db.get(collection, f"custom_roles.{topic_id}")
-            or group_roles.get(group_id)
-            or default_bot_role
-        )
+        roles = await fetch_roles()
+        default_role = roles.get("default")
+
+        if not default_role:
+            await client.send_message("me", "Error: 'default' role is missing in roles.json.")
+            return
+
+        bot_role = db.get(collection, f"custom_roles.{topic_id}") or group_roles.get(group_id) or default_role
         
         caption = message.caption.strip() if message.caption else ""
         chat_history = get_chat_history(topic_id, caption, user_name)
@@ -335,7 +339,6 @@ async def handle_files(client: Client, message: Message):
             "me", f"An error occurred in the `handle_files` function:\n\n{str(e)}"
         )
 
-
 @Client.on_message(filters.command(["wchat", "wc"], prefix) & filters.me)
 async def wchat_command(client: Client, message: Message):
     try:
@@ -387,7 +390,6 @@ async def wchat_command(client: Client, message: Message):
     except Exception as e:
         await client.send_message("me", f"An error occurred in the `wchat` command:\n\n{str(e)}")
 
-
 @Client.on_message(filters.command("wrole", prefix) & filters.me)
 async def set_custom_role(client: Client, message: Message):
     try:
@@ -400,6 +402,13 @@ async def set_custom_role(client: Client, message: Message):
         custom_role = " ".join(parts[2:]).strip()
         group_id = str(message.chat.id)
         topic_id = f"{group_id}:{message.message_thread_id}"
+
+        roles = await fetch_roles()
+        default_role = roles.get("default")
+
+        if not default_role:
+            await client.send_message("me", "Error: 'default' role is missing in roles.json.")
+            return
 
         if scope == "group":
             if not custom_role:
@@ -414,7 +423,7 @@ async def set_custom_role(client: Client, message: Message):
                 )
         elif scope == "topic":
             if not custom_role:
-                group_role = group_roles.get(group_id, default_bot_role)
+                group_role = group_roles.get(group_id, default_role)
                 db.set(collection, f"custom_roles.{topic_id}", group_role)
                 db.set(collection, f"chat_history.{topic_id}", None)
                 await message.edit_text(
@@ -435,6 +444,36 @@ async def set_custom_role(client: Client, message: Message):
         await client.send_message(
             "me", f"An error occurred in the `role` command:\n\n{str(e)}"
         )
+
+@Client.on_message(filters.command("wswitch", prefix) & filters.me)
+async def switch_role(client: Client, message: Message):
+    try:
+        roles = await fetch_roles()
+        if not roles:
+            await client.send_message("me", "Error: Failed to fetch roles.")
+            await message.edit_text("<b>Failed to fetch roles.</b>")
+            return
+
+        group_id = str(message.chat.id)
+        topic_id = f"{group_id}:{message.message_thread_id}"
+        parts = message.text.strip().split()
+
+        if len(parts) == 1:
+            available_roles = "\n".join([f"- {role}" for role in roles.keys()])
+            await message.edit_text(f"<b>Available roles:</b>\n\n{available_roles}")
+            return
+
+        role_name = parts[1].lower()
+        if role_name in roles:
+            db.set(collection, f"custom_roles.{topic_id}", roles[role_name])
+            db.set(collection, f"chat_history.{topic_id}", None)
+            await message.edit_text(f"Switched to: <b>{role_name}</b>")
+        else:
+            await message.edit_text(f"Role <b>{role_name}</b> not found.")
+
+        await message.delete()
+    except Exception as e:
+        await client.send_message("me", f"Error in switch command:\n\n{str(e)}")
 
 
 @Client.on_message(filters.command("setwkey", prefix) & filters.me)
@@ -498,6 +537,7 @@ modules_help["wchat"] = {
     "wrole group <custom role>": "Set a custom role for the bot for the current group.",
     "wrole topic <custom role>": "Set a custom role for the bot for the current topic and clear existing chat history.",
     "wrole reset": "Reset the custom role for the current group to default.",
+    "wswitch": "Switch wchat roles.",
     "setwkey add <key>": "Add a new Gemini API key.",
     "setwkey set <index>": "Set the current Gemini API key by index.",
     "setwkey del <index>": "Delete a Gemini API key by index.",
