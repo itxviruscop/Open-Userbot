@@ -343,14 +343,18 @@ async def handle_files(client: Client, message: Message):
 async def wchat_command(client: Client, message: Message):
     try:
         parts = message.text.strip().split()
+        group_id = str(message.chat.id)
 
         if len(parts) < 2:
             await message.edit_text(f"<b>Usage:</b> {prefix}wchat `on`, `off`, `del`, or `all`.")
             return
 
-        command = parts[1].lower()
-        group_id = str(message.chat.id)
-        topic_id = f"{group_id}:{message.message_thread_id}"
+        if len(parts) == 2:
+            topic_id = f"{group_id}:{message.message_thread_id}"
+            command = parts[1].lower()
+        else:
+            topic_id = f"{group_id}:{parts[1]}"
+            command = parts[2].lower()
 
         if command == "on":
             if topic_id in disabled_topics:
@@ -382,7 +386,7 @@ async def wchat_command(client: Client, message: Message):
             )
 
         else:
-            await message.edit_text(f"<b>Usage:</b> `wchat on`, `off`, `del`, or `all`.")
+            await message.edit_text(f"<b>Usage:</b> `wchat <topic_id> on`, `off`, `del`, or `all`.")
 
         await asyncio.sleep(1)
         await message.delete()
@@ -399,10 +403,7 @@ async def set_custom_role(client: Client, message: Message):
             return
 
         scope = parts[1].lower()
-        custom_role = " ".join(parts[2:]).strip()
         group_id = str(message.chat.id)
-        topic_id = f"{group_id}:{message.message_thread_id}"
-
         roles = await fetch_roles()
         default_role = roles.get("default")
 
@@ -411,18 +412,27 @@ async def set_custom_role(client: Client, message: Message):
             return
 
         if scope == "group":
-            if not custom_role:
+            if len(parts) == 2:
                 group_roles.pop(group_id, None)
                 db.set(collection, "group_roles", group_roles)
                 await message.edit_text(f"Role reset to default for group {group_id}.")
             else:
+                custom_role = " ".join(parts[2:]).strip()
                 group_roles[group_id] = custom_role
                 db.set(collection, "group_roles", group_roles)
                 await message.edit_text(
                     f"Role set successfully for group {group_id}!\n<b>New Role:</b> {custom_role}"
                 )
         elif scope == "topic":
-            if not custom_role:
+            if len(parts) == 2:
+                topic_id = f"{group_id}:{message.message_thread_id}"
+                db.set(collection, f"custom_roles.{topic_id}", default_role)
+                db.set(collection, f"chat_history.{topic_id}", None)
+                await message.edit_text(
+                    f"Role reset to default for topic {topic_id}."
+                )
+            elif len(parts) == 3:
+                topic_id = f"{group_id}:{parts[2]}"
                 group_role = group_roles.get(group_id, default_role)
                 db.set(collection, f"custom_roles.{topic_id}", group_role)
                 db.set(collection, f"chat_history.{topic_id}", None)
@@ -430,6 +440,12 @@ async def set_custom_role(client: Client, message: Message):
                     f"Role reset to group's role for topic {topic_id}."
                 )
             else:
+                if parts[2].isdigit():
+                    topic_id = f"{group_id}:{parts[2]}"
+                    custom_role = " ".join(parts[3:]).strip()
+                else:
+                    topic_id = f"{group_id}:{message.message_thread_id}"
+                    custom_role = " ".join(parts[2:]).strip()
                 db.set(collection, f"custom_roles.{topic_id}", custom_role)
                 db.set(collection, f"chat_history.{topic_id}", None)
                 await message.edit_text(
@@ -454,20 +470,25 @@ async def switch_role(client: Client, message: Message):
             await message.edit_text("<b>Failed to fetch roles.</b>")
             return
 
-        group_id = str(message.chat.id)
-        topic_id = f"{group_id}:{message.message_thread_id}"
         parts = message.text.strip().split()
-
+        group_id = str(message.chat.id)
+        
         if len(parts) == 1:
             available_roles = "\n".join([f"- {role}" for role in roles.keys()])
             await message.edit_text(f"<b>Available roles:</b>\n\n{available_roles}")
             return
 
-        role_name = parts[1].lower()
+        if len(parts) == 2:
+            topic_id = f"{group_id}:{message.message_thread_id}"
+            role_name = parts[1].lower()
+        else:
+            topic_id = f"{group_id}:{parts[1]}"
+            role_name = parts[2].lower()
+
         if role_name in roles:
             db.set(collection, f"custom_roles.{topic_id}", roles[role_name])
             db.set(collection, f"chat_history.{topic_id}", None)
-            await message.edit_text(f"Switched to: <b>{role_name}</b>")
+            await message.edit_text(f"Switched to: <b>{role_name}</b> for topic <b>{topic_id}</b>")
         else:
             await message.edit_text(f"Role <b>{role_name}</b> not found.")
 
