@@ -14,12 +14,11 @@
 #  You should have received a copy of the GNU General Public License
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import io
 import os
 import time
-
 from pyrogram import Client, filters
 from pyrogram.types import Message
-
 from utils.misc import modules_help, prefix
 from utils.scripts import format_exc, progress
 
@@ -36,7 +35,6 @@ async def upl(client: Client, message: Message):
         )
         return
 
-    # Ensure that the link is an absolute path to a file on your local machine
     if not os.path.isfile(link):
         await message.edit(
             f"<b>Error: </b><code>{link}</code> is not a valid file path."
@@ -75,15 +73,18 @@ async def mupl(client: Client, message: Message):
     if os.path.exists(link):
         try:
             await message.edit("<b>Uploading Now...</b>")
+            with open(link, "rb") as f:
+                data = f.read()
+            bio = io.BytesIO(data)
+            bio.name = "moonlogs.txt"
             await client.send_document(
                 message.chat.id,
-                link,
+                bio,
                 progress=progress,
-                progress_args=(message, time.time(), "<b>Uploading Now...</b>"),
+                progress_args=(message, time.time(), "<b>Uploading Now...</b>")
             )
             await message.delete()
         except Exception as e:
-            # Since message might have been deleted already, create a temporary reply if needed.
             await client.send_message(message.chat.id, format_exc(e))
     else:
         await message.edit("<b>Error: </b><code>LOGS</code> file doesn't exist.")
@@ -101,7 +102,6 @@ async def uplr(client: Client, message: Message):
         )
         return
 
-    # Ensure that the link is an absolute path to a file on your local machine
     if not os.path.isfile(link):
         await message.edit(
             f"<b>Error: </b><code>{link}</code> is not a valid file path."
