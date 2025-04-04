@@ -5,12 +5,12 @@
 #  it under the terms of the GNU General Public License as published by
 #  the Free Software Foundation, either version 3 of the License, or
 #  (at your option) any later version.
-
+#
 #  This program is distributed in the hope that it will be useful,
 #  but WITHOUT ANY WARRANTY; without even the implied warranty of
 #  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 #  GNU General Public License for more details.
-
+#
 #  You should have received a copy of the GNU General Public License
 #  along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
@@ -72,8 +72,8 @@ async def dlf(client: Client, message: Message):
 @Client.on_message(filters.command("moonlogs", prefix) & filters.me)
 async def mupl(client: Client, message: Message):
     link = "moonlogs.txt"
-    try:
-        if os.path.exists(link):
+    if os.path.exists(link):
+        try:
             await message.edit("<b>Uploading Now...</b>")
             await client.send_document(
                 message.chat.id,
@@ -82,9 +82,11 @@ async def mupl(client: Client, message: Message):
                 progress_args=(message, time.time(), "<b>Uploading Now...</b>"),
             )
             await message.delete()
-        return await message.edit("<b>Error: </b><code>LOGS</code> file doesn't exist.")
-    except Exception as e:
-        await message.edit(format_exc(e))
+        except Exception as e:
+            # Since message might have been deleted already, create a temporary reply if needed.
+            await client.send_message(message.chat.id, format_exc(e))
+    else:
+        await message.edit("<b>Error: </b><code>LOGS</code> file doesn't exist.")
 
 
 @Client.on_message(filters.command("uplr", prefix) & filters.me)
